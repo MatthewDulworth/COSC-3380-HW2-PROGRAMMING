@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bank Database Simulator</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 800px; margin: 0 auto; background: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); overflow: hidden; }
+        .header { background: #003366; color: white; padding: 20px; text-align: center; }
+        .header h1 { margin: 0; font-size: 24px; }
+        .tabs { display: flex; background: #e0e0e0; }
+        .tab { flex: 1; padding: 15px; text-align: center; cursor: pointer; font-weight: bold; border: none; background: none; transition: background 0.3s; }
+        .tab.active { background: #fff; color: #003366; border-bottom: 3px solid #003366; }
+        .tab:hover:not(.active) { background: #d0d0d0; }
+        .content { padding: 30px; display: none; }
+        .content.active { display: block; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button.action-btn { background: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; transition: background 0.3s; }
+        button.action-btn:hover { background: #0056b3; }
+        .message-box { margin-top: 20px; padding: 15px; border-radius: 4px; display: none; }
+        .message-box.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; display: block; }
+        .message-box.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; display: block; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #f8f9fa; }
+
+        /* Custom ATM Modal Styles */
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.4); z-index: 1000; align-items: center; justify-content: center;
+        }
+        .modal-box {
+            background: #fff; width: 90%; max-width: 450px; border-radius: 12px; padding: 25px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2); text-align: left;
+        }
+        .modal-box h3 { margin-top: 0; display: flex; align-items: center; gap: 10px; color: #333; }
+        .modal-box p { font-size: 14px; color: #555; margin-bottom: 15px; }
+        .modal-box input { 
+            width: 100%; padding: 12px; border: 2px solid #8e44ad; border-radius: 8px; 
+            font-size: 16px; box-sizing: border-box; outline: none; margin-bottom: 25px;
+        }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+        .btn-cancel { 
+            background: transparent; color: #333; border: 1px solid #ccc; 
+            padding: 10px 20px; border-radius: 20px; cursor: pointer; font-weight: bold; 
+        }
+        .btn-cancel:hover { background: #f0f0f0; }
+        .btn-ok { 
+            background: #8e44ad; color: white; border: none; 
+            padding: 10px 25px; border-radius: 20px; cursor: pointer; font-weight: bold; 
+        }
+        .btn-ok:hover { background: #732d91; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="header">
+            <h1>Global Bank Enterprise System</h1>
+        </div>
+        
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('customer')">Customer Portal</button>
+            <button class="tab" onclick="switchTab('company')">Company Back Office</button>
+        </div>
+
+        <!-- CUSTOMER SIDE -->
+        <div id="customer" class="content active">
+            <h2>Transfer Funds</h2>
+            <div class="form-group">
+                <label for="fromAccountSelect">Withdraw From Account:</label>
+                <select id="fromAccountSelect">
+                    <option value="1">Account 1</option>
+                    <option value="2">Account 2</option>
+                    <option value="3">Account 3</option>
+                    <option value="4">Account 4</option>
+                    <option value="5">Account 5</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="toAccountSelect">Deposit To Account:</label>
+                <select id="toAccountSelect">
+                    <option value="1">Account 1</option>
+                    <option value="2" selected>Account 2</option>
+                    <option value="3">Account 3</option>
+                    <option value="4">Account 4</option>
+                    <option value="5">Account 5</option>
+                </select>
+            </div>
+
+            <button class="action-btn" onclick="openAtmModal()">Initiate Transfer</button>
+            <div id="customerOutput" class="message-box"></div>
+        </div>
+
+        <!-- COMPANY SIDE -->
+        <div id="company" class="content">
+            <h2>Administrative Dashboard</h2>
+            <button class="action-btn" onclick="fetchCompanyRecords()" style="margin-bottom: 20px;">Refresh Database Records</button>
+            
+            <div id="companyOutput" class="message-box"></div>
+
+            <h3>Active Accounts (t1)</h3>
+            <table id="accountsTable">
+                <thead><tr><th>Account ID (k1)</th><th>Balance (a)</th><th>Data (b)</th></tr></thead>
+                <tbody><!-- Populated via JS --></tbody>
+            </table>
+
+            <h3 style="margin-top: 30px;">Recent Transaction Records (t2)</h3>
+            <table id="transactionsTable">
+                <thead><tr><th>TX ID</th><th>Account</th><th>Amount</th><th>Type</th><th>Timestamp</th></tr></thead>
+                <tbody><!-- Populated via JS --></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Custom ATM Modal Overlay -->
+    <div id="atmModal" class="modal-overlay">
+        <div class="modal-box">
+            <h3>🌐 file://</h3>
+            <p>how much money do you want to withdraw(just like it would be at an atm)</p>
+            <input type="number" id="atmAmountInput" step="0.01" min="0" placeholder="Enter amount...">
+            <div class="modal-actions">
+                <button class="btn-cancel" onclick="closeAtmModal()">Cancel</button>
+                <button class="btn-ok" onclick="submitTransaction()">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // UI Navigation Logic
+        function switchTab(tabId) {
+            document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            event.target.classList.add('active');
+            
+            if(tabId === 'company') {
+                fetchCompanyRecords();
+            }
+        }
+
+        function showMessage(elementId, message, isSuccess) {
+            const el = document.getElementById(elementId);
+            el.innerHTML = message;
+            el.className = 'message-box ' + (isSuccess ? 'success' : 'error');
+        }
+
+        // Modal Logic
+        function openAtmModal() {
+            document.getElementById('atmAmountInput').value = ''; // Reset input
+            document.getElementById('atmModal').style.display = 'flex';
+        }
+
+        function closeAtmModal() {
+            document.getElementById('atmModal').style.display = 'none';
+        }
+
+        // Asynchronous JavaScript function executing the transaction
+        async function submitTransaction() {
+            const fromAccountId = document.getElementById('fromAccountSelect').value;
+            const toAccountId = document.getElementById('toAccountSelect').value;
+            const amountString = document.getElementById('atmAmountInput').value;
+
+            // Close the custom modal immediately after clicking OK
+            closeAtmModal();
+
+            if (!amountString || isNaN(amountString) || Number(amountString) <= 0) {
+                showMessage('customerOutput', '<strong>Error:</strong> Valid withdrawal amount required.', false);
+                return;
+            }
+
+            document.getElementById('customerOutput').className = 'message-box';
+            document.getElementById('customerOutput').innerHTML = "Processing transaction...";
+            document.getElementById('customerOutput').style.display = 'block';
+
+            try {
+                const response = await fetch('http://localhost:3000/simulate-transaction', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fromAccountId, toAccountId, amountString })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showMessage('customerOutput', `<strong>Success!</strong><br>${data.message}`, true);
+                } else {
+                    showMessage('customerOutput', `<strong>Error:</strong> ${data.message}`, false);
+                }
+            } catch (error) {
+                showMessage('customerOutput', `<strong>Network Error:</strong> Ensure the Node server is running.`, false);
+            }
+        }
+
+        // Fetch back-office data for the company side
+        async function fetchCompanyRecords() {
+            try {
+                const response = await fetch('http://localhost:3000/company-records');
+                const data = await response.json();
+
+                if (data.success) {
+                    const accountsTbody = document.querySelector('#accountsTable tbody');
+                    accountsTbody.innerHTML = data.accounts.map(acc => 
+                        `<tr><td>${acc.k1}</td><td>$${acc.a}</td><td>${acc.b}</td></tr>`
+                    ).join('');
+
+                    const txTbody = document.querySelector('#transactionsTable tbody');
+                    txTbody.innerHTML = data.transactions.map(tx => 
+                        `<tr><td>${tx.tx_id}</td><td>${tx.account_id}</td><td>$${tx.amount}</td><td>${tx.tx_type}</td><td>${new Date(tx.tx_timestamp).toLocaleString()}</td></tr>`
+                    ).join('');
+                    
+                    document.getElementById('companyOutput').style.display = 'none';
+                } else {
+                    showMessage('companyOutput', `<strong>Error fetching records:</strong> ${data.message}`, false);
+                }
+            } catch (error) {
+                showMessage('companyOutput', `<strong>Network Error:</strong> Ensure the Node server is running.`, false);
+            }
+        }
+    </script>
+</body>
+</html>
