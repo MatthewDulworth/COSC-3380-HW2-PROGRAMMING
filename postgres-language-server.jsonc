@@ -1,0 +1,11 @@
+{
+  "$schema": "https://pgtools.dev/latest/schema.json",
+  // Local Postgres connection used for schema-aware completions and type checking.
+  "db": {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "username": "mdulworth",
+    "password": "",
+    "database": "hw2"
+  }
+}
