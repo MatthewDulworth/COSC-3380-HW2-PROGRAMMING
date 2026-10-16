@@ -1,24 +1,25 @@
 ------------ Tax ------------
 CREATE TABLE tax (
     state_code char(2) PRIMARY KEY,
-    tax_rate NUMERIC(5,4) NOT NULL
-        CHECK (tax_rate BETWEEN 0 and 1)
+    tax_rate NUMERIC(5,4) NOT NULL,
+
+    CONSTRAINT tax_rate_0_to_1 CHECK (tax_rate BETWEEN 0 and 1)
 );
 
 ------------ Department ------------
 CREATE TABLE department (
-    department_id INT PRIMARY KEY,
+    department_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
     name VARCHAR(60) NOT NULL
 );
 
 ------------ Store ------------
 CREATE TABLE store (
-    store_id INT PRIMARY KEY,
+    store_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
     city VARCHAR(60) NOT NULL,
     street VARCHAR(60) NOT NULL,
-    zip_code VARCHAR(60) NOT NULL,
+    zip_code VARCHAR(10) NOT NULL,
 
     state_code CHAR(2) NOT NULL,
     phone_number VARCHAR(20) NOT NULL,
@@ -29,7 +30,7 @@ CREATE TABLE store (
 
 ------------ Item ------------
 CREATE TABLE item (
-    sku CHAR(15) PRIMARY KEY,
+    sku VARCHAR(15) PRIMARY KEY,
 
     name VARCHAR(60) NOT NULL,
     department_id INT NOT NULL,
@@ -41,17 +42,19 @@ CREATE TABLE item (
 
 ------------ Store Transaction ------------ 
 CREATE TABLE store_transaction (
-    transaction_id SERIAL PRIMARY KEY,
+    transaction_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
     store_id INT NOT NULL,
-    account_id INT
-        CHECK((payment_method = 'card') = (account_id IS NOT NULL)),
+    account_id INT,
 
-    date_and_time TIMESTAMP NOT NULL,
+    date_and_time TIMESTAMPTZ NOT NULL 
+        DEFAULT now(),
     total_amount NUMERIC(10,2) NOT NULL,
+    payment_method VARCHAR(4) NOT NULL,
 
-    payment_method VARCHAR(4) NOT NULL
-        CHECK (payment_method IN ('card', 'cash')),
+    CONSTRAINT payment_is_card_or_cash CHECK (payment_method IN ('card', 'cash')),
+    CONSTRAINT card_must_have_account CHECK((payment_method = 'card') = (account_id IS NOT NULL)),
+    CONSTRAINT nonegative_total_amount CHECK(total_amount >= 0),
 
     FOREIGN KEY(store_id) REFERENCES store(store_id)
 );
@@ -59,12 +62,14 @@ CREATE TABLE store_transaction (
 ------------ Item Sale ------------
 CREATE TABLE item_sale (
     transaction_id INT,
-    sku CHAR(15),
+    sku VARCHAR(15),
 
     sold_weight NUMERIC(8,3),
-    sold_count INT
-        CHECK(sold_count > 0),
+    sold_count INT,
     sold_price NUMERIC(10,2) NOT NULL,
+
+    CONSTRAINT nonegative_sold_count CHECK(sold_count > 0),
+    CONSTRAINT nonegative_sold_price CHECK(total_price >= 0),
 
     PRIMARY KEY (transaction_id, sku),
     FOREIGN KEY (transaction_id) REFERENCES store_transaction(transaction_id),
@@ -73,14 +78,16 @@ CREATE TABLE item_sale (
 
 ------------ Inventory ------------
 CREATE TABLE inventory (
-    sku CHAR(15),
+    sku VARCHAR(15),
     store_id INT,
 
-    price NUMERIC(10,2) NOT NULL
-        CHECK (price >= 0),
-    num_in_stock INT NOT NULL 
-        CHECK (num_in_stock >= 0),
+    price NUMERIC(10,2) NOT NULL,
+    num_in_stock INT NOT NULL,
     aisle_no INT NOT NULL,
+
+    CONSTRAINT positive_aisle_no CHECK (aisle_no >= 1),
+    CONSTRAINT nonnegative_price CHECK (price >= 0),
+    CONSTRAINT nonnegative_stock CHECK (num_in_stock >= 0),
 
     PRIMARY KEY(sku, store_id),
     FOREIGN KEY (sku) REFERENCES item(sku),
