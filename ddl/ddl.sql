@@ -54,7 +54,7 @@ CREATE TABLE store_transaction (
 
     CONSTRAINT payment_is_card_or_cash CHECK (payment_method IN ('card', 'cash')),
     CONSTRAINT card_must_have_account CHECK((payment_method = 'card') = (account_id IS NOT NULL)),
-    CONSTRAINT nonegative_total_amount CHECK(total_amount >= 0),
+    CONSTRAINT nonnegative_total_amount CHECK(total_amount >= 0),
 
     FOREIGN KEY(store_id) REFERENCES store(store_id)
 );
@@ -68,8 +68,10 @@ CREATE TABLE item_sale (
     sold_count INT,
     sold_price NUMERIC(10,2) NOT NULL,
 
-    CONSTRAINT nonegative_sold_count CHECK(sold_count > 0),
-    CONSTRAINT nonegative_sold_price CHECK(total_price >= 0),
+    CONSTRAINT positive_sold_count CHECK(sold_count > 0),
+    CONSTRAINT nonnegative_sold_price CHECK(sold_price >= 0),
+    CONSTRAINT weight_xor_count CHECK ((sold_weight IS NULL) <> (sold_count IS NULL)),
+    CONSTRAINT positive_sold_weight CHECK (sold_weight > 0),
 
     PRIMARY KEY (transaction_id, sku),
     FOREIGN KEY (transaction_id) REFERENCES store_transaction(transaction_id),
