@@ -8,11 +8,11 @@ app.use(express.json());
 app.use(cors());
 
 const pool = new Pool({
-    user: USER,
-    host: HOST,
-    database: DATABASE,
-    password: PASSWORD, 
-    port: PORT,
+    user: process.env.DB_USER,
+    host: process.env.DB_HOST,
+    database: process.env.DB_NAME,
+    password: process.env.DB_PASSWORD,
+    port: process.env.DB_PORT,
 });
 
-app.listen(PORT, () => console.log('Supermarket API running on http://localhost:3000'));
+app.listen(3000, () => console.log(`Supermarket API running on http://localhost:3000`));
