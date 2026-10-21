@@ -9,10 +9,10 @@ app.use(cors());
 
 // Configure local PostgreSQL connection
 const pool = new Pool({
-    user: 'postgres',
+    user: 'mdulworth',
     host: 'localhost',
-    database: 'postgres',
-    password: 'password', 
+    database: 'hw2-bank-example',
+    password: '', 
     port: 5432,
 });
 
