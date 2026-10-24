@@ -19,6 +19,30 @@
             gap: 10px;
         }
 
+        /* Default auto margins keep an hr from stretching in a flex column */
+        .tab hr {
+            margin-inline: 0;
+            width: 100%;
+        }
+
+        .message {
+            padding: 8px 12px;
+            border: 1px solid;
+            border-radius: 4px;
+        }
+
+        .message.error {
+            color: #8a1c1c;
+            background: #fdecec;
+            border-color: #e5a3a3;
+        }
+
+        .message.success {
+            color: #1d5c2e;
+            background: #e9f7ee;
+            border-color: #9fd3b0;
+        }
+
         .display-none {
             display: none;
         }
@@ -50,6 +74,8 @@
             <div id="customer-tab" class="tab">
                 <h2>Customer Checkout</h2>
 
+                <hr>
+
                 <label>
                     Choose Store:
                     <select name="" id="location-select"></select>
@@ -66,15 +92,28 @@
                     <button id="add-to-cart">Add To Cart</button>
                 </label>
 
-                <label for="">
+                <hr>
 
+                <div id="cart-display" class="cart-display"></div>
+
+                <hr>
+
+                <label>
+                    Payment Method:
+                    <select id="payment-method-input">
+                        <option value="card">Card</option>
+                        <option value="cash">Cash</option>
+                    </select>
                 </label>
 
-                <div id="cart-display" class="cart-display">
+                <label id="account-num-label">
+                    Account Number:
+                    <input type="text" id="account-num-input">
+                </label>
 
-                </div>
+                <button id="checkout-btn">Checkout</button>
 
-                <button id="checkout">Checkout</button>
+                <div id="message-box" class="message display-none"></div>
             </div>
     
             <!-- **************************************************
@@ -105,6 +144,11 @@
     let quantityInput = document.getElementById("quantity-input");
     let addToCartBtn = document.getElementById("add-to-cart");
     let cartDisplay = document.getElementById("cart-display");
+    let paymentMethodInput = document.getElementById("payment-method-input");
+    let accountNumLabel = document.getElementById("account-num-label");
+    let accountNumInput = document.getElementById("account-num-input");
+    let checkoutBtn = document.getElementById("checkout-btn");
+    let messageBox = document.getElementById("message-box");
 
     let resetBtn = document.getElementById("reset-btn");
 
@@ -123,21 +167,21 @@
     // ------------------------------------------------------------------------------
     // Tab Switching
     // ------------------------------------------------------------------------------
-    backendTabBtn.addEventListener("click", _ => {
+    backendTabBtn.addEventListener("click", () => {
         hide(customerTab);
         show(backendTab);
     });
 
-    customerTabBtn.addEventListener("click", _ => {
+    customerTabBtn.addEventListener("click", () => {
         show(customerTab);
         hide(backendTab);
     });
 
     // ------------------------------------------------------------------------------
-    // Checkout
+    // Select Store and Items
     // ------------------------------------------------------------------------------
     // Inventory is per store, so switching stores empties the cart
-    locationSelect.addEventListener('change', _ => {
+    locationSelect.addEventListener('change', () => {
         cart = [];
         renderCart();
         loadItems();
@@ -145,7 +189,7 @@
 
     async function loadItems() {
         try {
-            const data = await fetchData('inventory', { storeID: Number(locationSelect.value) });
+            const data = await postJSON('inventory', { storeID: Number(locationSelect.value) });
             if (!data.success) throw new Error(data.message);
             setItemSelect(data.items);
 
@@ -166,7 +210,7 @@
         setQuantityInput();
     }
 
-    itemSelect.addEventListener('change', _ => setQuantityInput());
+    itemSelect.addEventListener('change', () => setQuantityInput());
 
     // Weighed items take up to 3 decimals; counted items take whole numbers
     function setQuantityInput() {
@@ -182,7 +226,7 @@
     // ------------------------------------------------------------------------------
     // Cart
     // ------------------------------------------------------------------------------
-    addToCartBtn.addEventListener('click', _ => addToCart());
+    addToCartBtn.addEventListener('click', () => addToCart());
 
     function addToCart() {
         const item = inventory.find(i => i.sku === itemSelect.value);
@@ -190,7 +234,7 @@
 
         if (!item) return;
         if (!quantityInput.checkValidity() || quantity <= 0) {
-            alert(item.priced_by_weight
+            showMessage(item.priced_by_weight
                 ? 'Enter a weight greater than 0 with at most 3 decimals.'
                 : 'Enter a whole-number quantity of at least 1.');
             return;
@@ -200,9 +244,11 @@
         const newQuantity = round((existing?.quantity ?? 0) + quantity, 3);
 
         if (newQuantity > Number(item.quantity_in_stock)) {
-            alert(`Only ${Number(item.quantity_in_stock)} of ${item.name} in stock.`);
+            showMessage(`Only ${Number(item.quantity_in_stock)} of ${item.name} in stock.`);
             return;
         }
+
+        clearMessage();
 
         if (existing) {
             existing.quantity = newQuantity;
@@ -272,13 +318,61 @@
     }
 
     // ------------------------------------------------------------------------------
+    // Checkout
+    // ------------------------------------------------------------------------------
+    // Only card payments need an account number
+    paymentMethodInput.addEventListener("change", () => setAccountNumVisibility());
+    setAccountNumVisibility();
+
+    function setAccountNumVisibility() {
+        if (paymentMethodInput.value === "card") {
+            show(accountNumLabel);
+        } else {
+            hide(accountNumLabel);
+            accountNumInput.value = "";
+        }
+    }
+
+    checkoutBtn.addEventListener("click", () => checkout());
+
+    async function checkout() {
+        try {
+            const data = await postJSON('test-transaction', {
+                storeId: Number(locationSelect.value),
+                items: cart,
+                paymentMethod: paymentMethodInput.value,
+                accountId: Number(accountNumInput.value)
+            });
+
+            // Validation failures come back as { error }, transaction failures as { success: false, message }
+            if (data.error || !data.success) {
+                throw new Error(data.error ?? data.message);
+            }
+
+            cart = [];
+            renderCart();
+            // Stock changed, so refresh the item list
+            await loadItems();
+
+            showMessage(
+                `Transaction #${data.transactionId} complete. Total charged: $${data.total} (${data.paymentMethod}).`,
+                'success'
+            );
+
+        } catch (error) {
+            console.error(error);
+            showMessage(`Checkout failed: ${error.message}`);
+        }
+    }
+
+    // ------------------------------------------------------------------------------
     // Reset
     // ------------------------------------------------------------------------------
     resetBtn.addEventListener("click", _ => resetDatabase());
 
     async function resetDatabase() {
         try {
-            const data = await fetchData('reset-tables');
+            const data = await postJSON('reset-tables');
             setLocationSelect(data.stores);
             cart = [];
             renderCart();
@@ -311,12 +405,23 @@
         node.classList.remove("display-none");
     }
 
+    function showMessage(text, type = 'error') {
+        messageBox.textContent = text;
+        messageBox.classList.remove('error', 'success');
+        messageBox.classList.add(type);
+        show(messageBox);
+    }
+
+    function clearMessage() {
+        hide(messageBox);
+    }
+
     function round(value, decimals) {
         const factor = 10 ** decimals;
         return Math.round(value * factor) / factor;
     }
 
-    async function fetchData(endpoint, body = {}) {
+    async function postJSON(endpoint, body = {}) {
         const response = await fetch(`http://localhost:3000/${endpoint}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
