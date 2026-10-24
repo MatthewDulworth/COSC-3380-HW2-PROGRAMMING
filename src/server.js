@@ -383,7 +383,80 @@ app.get('/reports/top-selling-items', async (req, res) => {
             success: false,
             message: error.message
         });
-    }   
+    }
+});
+
+// ------------------------------------------------------------------------------
+// Low Stock Reorder List
+// ------------------------------------------------------------------------------
+// Items below the stock threshold, with how fast they sold over the last 30 days
+// so the fastest-selling shortages come first. Optional storeId limits it to one
+// store; threshold defaults to 10 (units, or lbs for weighed items).
+app.post('/reports/low-stock', async (req, res) => {
+    const { storeId = null, threshold = 10 } = req.body;
+
+    if (storeId !== null &&
+        (!Number.isInteger(storeId) || storeId <= 0)) {
+        return res.status(400).json({ success: false, message: 'Invalid store ID' });
+    }
+
+    if (typeof threshold !== 'number' ||
+        !Number.isFinite(threshold) ||
+        threshold <= 0) {
+        return res.status(400).json({ success: false, message: 'Invalid threshold' });
+    }
+
+    try {
+        const result = await supermarketPool.query(`
+            SELECT
+                s.store_id,
+                s.street,
+                s.city,
+                s.state_code,
+                inv.aisle_no,
+                i.sku,
+                i.name AS item_name,
+                d.name AS department_name,
+                i.priced_by_weight,
+                inv.quantity_in_stock,
+                COALESCE(recent.quantity_sold, 0) AS sold_last_30_days
+            FROM inventory AS inv
+            JOIN item AS i ON inv.sku = i.sku
+            JOIN department AS d ON i.department_id = d.department_id
+            JOIN store AS s ON inv.store_id = s.store_id
+            LEFT JOIN (
+                SELECT
+                    t.store_id,
+                    si.sku,
+                    SUM(si.quantity_sold) AS quantity_sold
+                FROM item_sale AS si
+                JOIN store_transaction AS t ON si.transaction_id = t.transaction_id
+                WHERE t.date_and_time >= now() - INTERVAL '30 days'
+                GROUP BY t.store_id, si.sku
+            ) AS recent ON recent.store_id = inv.store_id AND recent.sku = inv.sku
+            WHERE inv.quantity_in_stock < $1
+              AND ($2::INTEGER IS NULL OR inv.store_id = $2)
+            ORDER BY
+                inv.quantity_in_stock,
+                sold_last_30_days DESC,
+                s.store_id,
+                inv.aisle_no;
+        `, [threshold, storeId]);
+
+        console.log(`Low stock report (store ${storeId ?? 'all'}, < ${threshold}): ` +
+            `${result.rows.length} rows`);
+
+        return res.json({
+            success: true,
+            rows: result.rows
+        });
+    } catch (error) {
+        console.error(`Low stock report failed: ${error.message}`);
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
 });
 
 

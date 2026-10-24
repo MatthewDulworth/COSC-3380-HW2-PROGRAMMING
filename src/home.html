@@ -157,6 +157,7 @@
                 <div id="report-btns">
                     <button id="monthly-sales-btn" data-report="monthlySales">Monthly Sales Report</button>
                     <button id="top-sales-btn" data-report="topSellingItems">Top Selling Item per Department</button>
+                    <button id="low-stock-btn" data-report="lowStock">Low Stock Reorder List</button>
                 </div>
 
                 <!-- Only shown for reports with storeFilter: true -->
@@ -518,6 +519,23 @@
                 ['Item', r => r.item_name],
                 ['Quantity Sold', r => Number(r.total_quantity_sold)],
                 ['Revenue', r => money(r.total_revenue)],
+            ],
+        },
+        lowStock: {
+            title: 'Low Stock Reorder List (under 10 in stock)',
+            storeFilter: true,
+            load: () => postJSON('reports/low-stock', {
+                storeId: reportStoreSelect.value ? Number(reportStoreSelect.value) : null,
+            }),
+            rowsKey: 'rows',
+            columns: [
+                ['Store', r => `${r.street}, ${r.city}, ${r.state_code}`],
+                ['Aisle', r => r.aisle_no],
+                ['SKU', r => r.sku],
+                ['Item', r => r.item_name],
+                ['Department', r => r.department_name],
+                ['In Stock', r => `${Number(r.quantity_in_stock)}${r.priced_by_weight ? ' lb' : ''}`],
+                ['Sold (30 days)', r => `${Number(r.sold_last_30_days)}${r.priced_by_weight ? ' lb' : ''}`],
             ],
         },
     };
