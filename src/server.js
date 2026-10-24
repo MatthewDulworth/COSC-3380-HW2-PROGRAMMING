@@ -28,31 +28,64 @@ const bankPool = new Pool({
     port: process.env.DB_PORT,
 });
 
+
 // ------------------------------------------------------------------------------
 // Test Transaction Endpoint
 // ------------------------------------------------------------------------------
-// Endpoint to test a transaction with 1 item
+// Endpoint to test a transaction with more than 1 item
 app.post('/test-transaction', async (req, res) => {
-    const { storeId, sku, quantity, paymentMethod, accountId } = req.body;
+    const { storeId, items, paymentMethod, accountId } = req.body;
 
     // Validate storeId
     if (!Number.isInteger(storeId) || storeId <= 0) {
         return res.status(400).json({ error: 'Invalid store ID' });
     }
 
-    // Validate SKU
-    if (typeof sku !== 'string' || !sku.trim()) {
-        return res.status(400).json({ error: 'Invalid SKU' });
+    // Validate Items
+    if (!Array.isArray(items) || items.length === 0){
+        return res.status(400).json({ error: 'Invalid item array' });
     }
 
-    // Validate quantity
-    if (typeof quantity !== 'number' ||
-        !Number.isFinite(quantity) ||
-        quantity <= 0 ||
-        // Reject quantities with more than three decimal places
-        Math.abs(quantity * 1000 - Math.round(quantity * 1000)) > 1e-7) {
-        return res.status(400).json({ error: 'Invalid quantity' });
-    }
+
+    // Sku into array
+    const combinedItems = new Map();
+
+    for (const purchasedItem of items) {
+        if (!purchasedItem || 
+            typeof purchasedItem.sku !== 'string' ||
+            !purchasedItem.sku.trim()) {
+            return res.status(400).json({ error: 'Invalid SKU' });
+        }
+
+
+        const quantity = purchasedItem.quantity;
+
+        if (typeof quantity !== 'number' ||
+            !Number.isFinite(quantity) ||
+            quantity <= 0 ||
+            Math.abs(quantity * 1000 - Math.round(quantity * 1000)) > 1e-7) {
+            return res.status(400).json({ error: 'Invalid quantity'  });
+        }
+
+        const sku = purchasedItem.sku.trim()
+
+        const quantityUnits = Math.round(quantity * 1000);
+
+        if (!Number.isSafeInteger(quantityUnits) ||
+            quantityUnits <= 0) {
+            return res.status(400).json({ error: 'Invalid quantity' });
+            
+        }
+        
+        const previousUnits = combinedItems.get(sku) || 0;
+        const newUnits = previousUnits + quantityUnits;
+        
+        if(!Number.isSafeInteger(newUnits)){
+            return res.status(400).json({ error: 'Quantity too large' })
+        }
+
+        combinedItems.set(sku, newUnits);
+    } 
 
     // Validate payment method
     if (paymentMethod !== 'card' && paymentMethod !== 'cash') {
@@ -63,6 +96,11 @@ app.post('/test-transaction', async (req, res) => {
         (!Number.isInteger(accountId) || accountId <= 0)) {
         return res.status(400).json({ error: 'Invalid account ID' });
     }
+
+    const cart = Array.from(combinedItems, ([sku, units]) => ({
+        sku,
+        quantity: units / 1000
+    })).sort((a,b) => a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0);
 
     let client;
     let bankClient;
@@ -77,8 +115,14 @@ app.post('/test-transaction', async (req, res) => {
             await bankClient.query('BEGIN');
         }
 
-        // Retrieve item information, inventory, and tax rate
-        const storeResult = await client.query(`
+
+        const validatedItems = [];
+        const lineTotals = [];
+
+
+       for (const purchasedItem of cart) {
+            // Retrieve item information, inventory, and tax rate
+            const storeResult = await client.query(`
             SELECT
                 inv.price,
                 inv.quantity_in_stock,
@@ -91,36 +135,57 @@ app.post('/test-transaction', async (req, res) => {
             JOIN tax AS t ON s.state_code = t.state_code
             WHERE inv.store_id = $1 AND inv.sku = $2
             FOR UPDATE OF inv
-        `, [storeId, sku]);
+        `, [storeId, purchasedItem.sku]);
 
-        if (storeResult.rows.length === 0) {
-            throw new Error('Item not found in this store');
-        }
+            if (storeResult.rows.length === 0) {
+                throw new Error(
+                    `Item ${purchasedItem.sku} not found in this store`);
+            }
 
-        const item = storeResult.rows[0];
+            const item = storeResult.rows[0];
 
-        // Check that the quantity is appropriate for the item
-        if (typeof quantity !== 'number' ||
-            !Number.isFinite(quantity) ||
-            quantity <= 0 ||
-            (!item.priced_by_weight && !Number.isInteger(quantity))) {
-            throw new Error('Invalid Item quantity');
-        }
+            // Check weight based items
+            if (!item.priced_by_weight &&
+                !Number.isInteger(purchasedItem.quantity)) {
+                throw new Error(
+                    `Invalid quantity for ${purchasedItem.sku}`);
+            }
 
-        // Prevent purchases exceeding available stock
-        if (Number(item.quantity_in_stock) < quantity) {
-            throw new Error('Not enough stock available');
-        }
+            // Prevent purchases exceeding available stock
+            if (Number(item.quantity_in_stock) < purchasedItem.quantity) {
+                throw new Error(
+                    `Not enough stock for ${purchasedItem.sku}`);
+            }
 
-        // Calculate total price including applicable sales tax
-        const totalResult = await client.query(`
+            // Calculate total price including applicable sales tax
+            const lineResult = await client.query(`
             SELECT ROUND(
                 $1::NUMERIC * $2::NUMERIC *
                 (1 + CASE WHEN $3::BOOLEAN THEN 0 ELSE $4::NUMERIC END),
                 2
-            ) AS total
-        `, [item.price, quantity, item.tax_exempt, item.tax_rate]);
+            ) AS line_total
+        `, [item.price, purchasedItem.quantity, item.tax_exempt, item.tax_rate]);
 
+            // Save calculated total
+            lineTotals.push(lineResult.rows[0].line_total);
+
+            //
+            validatedItems.push({
+                sku: purchasedItem.sku,
+                quantity: purchasedItem.quantity,
+                price: item.price
+            });
+        }
+
+        // Add lines totals
+        const totalResult = await client.query(`
+            SELECT COALESCE(
+                SUM(amount),
+                0
+            ) AS total
+            FROM UNNEST($1::NUMERIC[]) AS amounts(amount)
+            `, [lineTotals]);
+        
         // Get the calculated total
         const total = totalResult.rows[0].total;
 
@@ -151,19 +216,21 @@ app.post('/test-transaction', async (req, res) => {
 
         const transactionId = transactionResult.rows[0].transaction_id;
 
-        // Record the specific item purchased
-        await client.query(`
-            INSERT INTO item_sale
-                (transaction_id, sku, quantity_sold, unit_price)
-            VALUES ($1, $2, $3, $4)
-        `, [transactionId, sku, quantity, item.price]);
-
-        // Subtract purchased quantity from store inventory
-        await client.query(`
-            UPDATE inventory
-            SET quantity_in_stock = quantity_in_stock - $1
-            WHERE store_id = $2 AND sku = $3
-        `, [quantity, storeId, sku]);
+        for (const purchasedItem of validatedItems) {
+            // Record the specific item purchased
+            await client.query(`
+                INSERT INTO item_sale
+                    (transaction_id, sku, quantity_sold, unit_price)
+                VALUES ($1, $2, $3, $4)
+            `, [transactionId, purchasedItem.sku, purchasedItem.quantity, purchasedItem.price]);
+            
+            // Subtract purchased quantity from store inventory
+            await client.query(`
+                UPDATE inventory
+                SET quantity_in_stock = quantity_in_stock - $1
+                WHERE store_id = $2 AND sku = $3
+            `, [purchasedItem.quantity, storeId, purchasedItem.sku]);
+        }
 
         if (bankClient) {
             await bankClient.query('COMMIT');
