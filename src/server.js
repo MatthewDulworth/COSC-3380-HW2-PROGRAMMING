@@ -268,6 +268,50 @@ app.post('/test-transaction', async (req, res) => {
 });
 
 // ------------------------------------------------------------------------------
+// Monthly Sales Per Store
+// ------------------------------------------------------------------------------
+// Retrieve monthly sales data
+app.get('/reports/monthly-sales', async (req, res) => {
+
+try {
+    const result = await supermarketPool.query(`
+        SELECT 
+            s.store_id,
+            s.city,
+            s.state_code,
+            DATE_TRUNC('month', t.date_and_time)::DATE
+                AS sales_month,
+            COUNT(t.transaction_id)
+                AS total_transactions,
+            SUM(t.total_amount)
+                AS total_revenue,
+            ROUND(AVG(t.total_amount), 2)
+                AS average_transaction
+        FROM store_transaction AS t
+        JOIN store AS s ON t.store_id = s.store_id
+        GROUP BY
+            s.store_id,
+            s.city,
+            s.state_code,
+            DATE_TRUNC('month', t.date_and_time)
+        ORDER BY sales_month DESC, total_revenue DESC;
+        `)
+
+        return res.json({
+            success: true,
+            sales: result.rows
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
+
+// ------------------------------------------------------------------------------
 // Reset Endpoint
 // ------------------------------------------------------------------------------
 app.post('/reset-tables', async (req, res) => {
