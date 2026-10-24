@@ -314,6 +314,79 @@ app.post('/reports/monthly-sales', async (req, res) => {
     }
 });
 
+
+// ------------------------------------------------------------------------------
+// Top Selling Items by Department Endpoint
+// ------------------------------------------------------------------------------
+// Shows the highest revenue item in each department.
+// By default, the report includes all stores.
+// To filter by a specific store, add ?storeId=1 to the URL.
+
+app.get('/reports/top-selling-items', async (req, res) => {
+
+    // Filter top-selling items across all stores or within a specific store
+    const storeId = req.query.storeId === undefined ? null : Number(req.query.storeId);
+
+    // Null means result from all stores
+    if (storeId !== null &&
+        (!Number.isInteger(storeId) || storeId <= 0)) {
+
+        return res.status(400).json({
+            success: false,
+            error: 'Invalid store ID'
+        });
+    }
+
+    try {
+        const result = await supermarketPool.query(`
+            WITH top_selling AS (
+                SELECT
+                    d.department_id,
+                    d.name AS department_name,
+                    i.sku,
+                    i.name AS item_name,
+                    SUM(s.quantity_sold) AS total_quantity_sold,
+                    SUM(s.quantity_sold * s.unit_price) AS total_revenue
+                FROM item_sale AS s
+                JOIN item AS i ON s.sku = i.sku
+                JOIN department AS d ON i.department_id = d.department_id
+                JOIN store_transaction AS t ON s.transaction_id = t.transaction_id
+                WHERE ($1::INTEGER IS NULL OR t.store_id = $1)
+                GROUP BY d.department_id, d.name, i.sku, i.name
+        ),
+        ranked_products AS (
+            SELECT *,
+                ROW_NUMBER() OVER (PARTITION BY department_id 
+                ORDER BY total_revenue DESC, sku
+                ) AS product_rank
+            FROM top_selling
+        )
+        SELECT 
+            department_name, 
+            sku, 
+            item_name, 
+            total_quantity_sold, 
+            total_revenue
+        FROM ranked_products
+        WHERE product_rank = 1
+        ORDER BY department_name;
+        `, [storeId]);
+
+        return res.json({
+            success: true,
+            storeId: storeId,
+            items: result.rows
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }   
+});
+
+
 // ------------------------------------------------------------------------------
 // Reset Endpoint
 // ------------------------------------------------------------------------------
