@@ -270,13 +270,15 @@ app.post('/test-transaction', async (req, res) => {
 // Monthly Sales Per Store
 // ------------------------------------------------------------------------------
 // Retrieve monthly sales data
-app.get('/reports/monthly-sales', async (req, res) => {
+app.post('/reports/monthly-sales', async (req, res) => {
     try {
         const result = await supermarketPool.query(`
             SELECT
                 s.store_id,
+                s.street,
                 s.city,
                 s.state_code,
+                s.zip_code,
                 DATE_TRUNC('month', t.date_and_time)::DATE
                     AS sales_month,
                 COUNT(t.transaction_id)
@@ -289,8 +291,10 @@ app.get('/reports/monthly-sales', async (req, res) => {
             JOIN store AS s ON t.store_id = s.store_id
             GROUP BY
                 s.store_id,
+                s.street,
                 s.city,
                 s.state_code,
+                s.zip_code,
                 DATE_TRUNC('month', t.date_and_time)
             ORDER BY sales_month DESC, total_revenue DESC;
         `);
@@ -299,7 +303,7 @@ app.get('/reports/monthly-sales', async (req, res) => {
 
         return res.json({
             success: true,
-            sales: result.rows
+            rows: result.rows
         });
     } catch (error) {
         console.error(`Monthly sales report failed: ${error.message}`);

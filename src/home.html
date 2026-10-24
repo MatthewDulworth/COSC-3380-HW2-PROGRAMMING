@@ -44,16 +44,23 @@
         }
 
         /* 300 accounts is too tall for the page, so the table scrolls */
-        .accounts-display {
+        .accounts-display,
+        .report-display {
             max-height: 400px;
             overflow-y: auto;
         }
 
         /* Keep the column names visible while the rows scroll under them */
-        .accounts-display th {
+        .accounts-display th,
+        .report-display th {
             position: sticky;
             top: 0;
             background: Canvas;
+        }
+
+        .report-display th,
+        .report-display td {
+            padding: 6px 12px;
         }
 
         .display-none {
@@ -137,10 +144,24 @@
             // Supermarket Backend
             *************************************************** -->
             <div id="backend-tab" class="tab display-none"> 
-                <h2>Backend</h2>
-                <button id="reset-btn">Reset Supermarket Tables</button>
 
+                <h2>Backend</h2>
+
+                <button id="reset-btn">Reset Supermarket Tables</button>
                 <div id="backend-message-box" class="message display-none"></div>
+
+                <hr>
+
+                <h3>Reports</h3>
+
+                <div id="report-btns">
+                    <button id="monthly-sales-btn" data-report="monthlySales">Monthly Sales Report</button>
+                    <button id="top-sales-btn">Top Sales By Department</button>
+                </div>
+                
+                <div id="report-title"></div>
+                    
+                <div id="report-display" class="report-display"></div>
             </div>
 
             <!-- **************************************************
@@ -195,6 +216,9 @@
     let bankResetBtn = document.getElementById("bank-reset-btn");
     let bankMessageBox = document.getElementById("bank-message-box");
     let accountsDisplay = document.getElementById("accounts-display");
+
+    let reportTitle = document.getElementById("report-title");
+    let reportDisplay = document.getElementById("report-display");
 
     // ------------------------------------------------------------------------------
     // State 
@@ -429,7 +453,7 @@
     }
 
     // ------------------------------------------------------------------------------
-    // Reset
+    // Supermarket Reset
     // ------------------------------------------------------------------------------
     resetBtn.addEventListener("click", _ => resetDatabase());
 
@@ -449,6 +473,80 @@
             console.error(error);
             showMessage(`Supermarket reset failed: ${error.message}`, 'error', backendMessageBox);
         }
+    }
+
+    // ------------------------------------------------------------------------------
+    // Reports
+    // ------------------------------------------------------------------------------
+    // To add a report: add an entry here, a server endpoint that returns
+    // { success, rows }, and a button with data-report="<key>"
+    const money = n => `$${Number(n).toFixed(2)}`;
+
+    const REPORTS = {
+        monthlySales: {
+            title: 'Monthly Sales',
+            endpoint: 'reports/monthly-sales',
+            columns: [
+                ['Month', r => r.sales_month.slice(0, 7)],
+                ['Store', r => `${r.street}, ${r.city}, ${r.state_code}, ${r.zip_code}`],
+                ['Transactions', r => r.total_transactions],
+                ['Revenue', r => money(r.total_revenue)],
+                ['Avg Transaction', r => money(r.average_transaction)],
+            ],
+        },
+    };
+
+    document.querySelectorAll("[data-report]").forEach(btn =>
+        btn.addEventListener("click", () => runReport(REPORTS[btn.dataset.report]))
+    );
+
+    async function runReport(report) {
+        reportTitle.textContent = report.title;
+        reportDisplay.replaceChildren('Loading...');
+
+        try {
+            const data = await postJSON(report.endpoint);
+            if (!data.success) throw new Error(data.message);
+
+            renderReport(report, data.rows);
+
+        } catch (error) {
+            console.error(error);
+            reportDisplay.replaceChildren();
+            showMessage(`${report.title} failed: ${error.message}`, 'error', backendMessageBox);
+        }
+    }
+
+    function renderReport(report, rows) {
+        if (rows.length === 0) {
+            reportDisplay.replaceChildren('No data.');
+            return;
+        }
+
+        const table = document.createElement('table');
+
+        const headRow = document.createElement('tr');
+        for (const [header] of report.columns) {
+            const th = document.createElement('th');
+            th.textContent = header;
+            headRow.appendChild(th);
+        }
+        table.createTHead().appendChild(headRow);
+
+        const tbody = document.createElement('tbody');
+        for (const r of rows) {
+            const row = document.createElement('tr');
+
+            for (const [, value] of report.columns) {
+                const td = document.createElement('td');
+                td.textContent = value(r);
+                row.appendChild(td);
+            }
+            tbody.appendChild(row);
+        }
+        table.appendChild(tbody);
+
+        reportDisplay.replaceChildren(table);
     }
 
     // ------------------------------------------------------------------------------
