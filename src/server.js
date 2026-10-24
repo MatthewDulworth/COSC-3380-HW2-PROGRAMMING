@@ -408,9 +408,9 @@ app.post('/inventory', async (req, res) => {
             SELECT *
             FROM inventory
             JOIN item ON inventory.sku = item.sku
-            WHERE store_id = ${storeID};
+            WHERE store_id = $1;
         `;
-        const items = await supermarketPool.query(queryInventory);
+        const items = await supermarketPool.query(queryInventory, [storeID]);
         console.log(`Loaded ${items.rows.length} inventory items for store ${storeID}`);
 
         res.json({
