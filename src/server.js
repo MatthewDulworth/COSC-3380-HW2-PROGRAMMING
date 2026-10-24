@@ -237,6 +237,9 @@ app.post('/test-transaction', async (req, res) => {
         }
         await client.query('COMMIT');
 
+        console.log(`Transaction #${transactionId} at store ${storeId}: ` +
+            `${validatedItems.length} items, $${total} (${paymentMethod})`);
+
         // Return successful purchase information
         return res.json({
             success: true,
@@ -246,6 +249,8 @@ app.post('/test-transaction', async (req, res) => {
             paymentMethod: paymentMethod,
         });
     } catch (error) {
+        console.error(`Transaction at store ${storeId} rolled back: ${error.message}`);
+
         if (client) {
             await client.query('ROLLBACK').catch(console.error);
         }
@@ -297,12 +302,15 @@ try {
         ORDER BY sales_month DESC, total_revenue DESC;
         `)
 
+        console.log(`Monthly sales report: ${result.rows.length} rows`);
+
         return res.json({
             success: true,
             sales: result.rows
         });
 
     } catch (error) {
+        console.error(`Monthly sales report failed: ${error.message}`);
         return res.status(500).json({
             success: false,
             message: error.message
@@ -319,10 +327,11 @@ app.post('/reset-tables', async (req, res) => {
         // Reset the supermarket database
         const ddl = fs.readFileSync(path.join(__dirname, '..', 'ddl', 'ddl.sql'), 'utf8');
         await supermarketPool.query(ddl);
-        console.log('Ran ddl.sql');
+        console.log('Supermarket tables reset from ddl.sql');
 
         res.json({ success: true });
     } catch (error) {
+        console.error(`Supermarket reset failed: ${error.message}`);
         res.status(500).json({ success: false, message: error.message });
     }
 });
@@ -338,12 +347,14 @@ app.post('/accounts', async (req, res) => {
         ORDER BY account_number;
         `;
         const accounts = await bankPool.query(queryAccounts);
+        console.log(`Loaded ${accounts.rows.length} bank accounts`);
 
         res.json({
             success: true,
             accounts: accounts.rows,
         });
     } catch (error) {
+        console.error(`Loading bank accounts failed: ${error.message}`);
         res.status(500).json({ success: false, message: error.message });
     }
 });
@@ -354,14 +365,20 @@ app.post('/accounts', async (req, res) => {
 app.post('/stores', async (req, res) => {
     try {
         // Get the stores table
-        const queryStores = `SELECT * FROM store ORDER BY store_id;`;
+        const queryStores = `
+        SELECT * 
+        FROM store 
+        ORDER BY store_id;
+        `;
         const stores = await supermarketPool.query(queryStores);
+        console.log(`Loaded ${stores.rows.length} stores`);
 
         res.json({
             success: true,
             stores: stores.rows,
         });
     } catch (error) {
+        console.error(`Loading stores failed: ${error.message}`);
         res.status(500).json({ success: false, message: error.message });
     }
 });
@@ -374,16 +391,17 @@ app.post('/reset-bank', async (req, res) => {
         // Reset the bank database
         const ddl = fs.readFileSync(path.join(__dirname, '..', 'ddl', 'bankddl.sql'), 'utf8');
         await bankPool.query(ddl);
-        console.log('Ran bankddl.sql');
 
         const queryAccounts = `SELECT count(*)::int AS count FROM account;`;
         const accounts = await bankPool.query(queryAccounts);
+        console.log(`Bank tables reset from bankddl.sql: ${accounts.rows[0].count} accounts`);
 
         res.json({
             success: true,
             accountCount: accounts.rows[0].count,
         });
     } catch (error) {
+        console.error(`Bank reset failed: ${error.message}`);
         res.status(500).json({ success: false, message: error.message });
     }
 });
@@ -402,12 +420,14 @@ app.post('/inventory', async (req, res) => {
         WHERE store_id=${storeID};
         `;
         const items = await supermarketPool.query(queryInventory);
+        console.log(`Loaded ${items.rows.length} inventory items for store ${storeID}`);
 
-        res.json({ 
-            success: true, 
-            items: items.rows, 
+        res.json({
+            success: true,
+            items: items.rows,
         });
     } catch(error) {
+        console.error(`Loading inventory for store ${storeID} failed: ${error.message}`);
         res.status(500).json({ success: false, message: error.message });
     }
 });

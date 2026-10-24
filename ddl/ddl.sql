@@ -118,7 +118,14 @@ INSERT INTO tax (state_code, tax_rate) VALUES
     ('NY', 0.0400),
     ('FL', 0.0600),
     ('LA', 0.0445),
-    ('OK', 0.0450);
+    ('OK', 0.0450),
+    ('AZ', 0.0560),
+    ('GA', 0.0400),
+    ('IL', 0.0625),
+    ('AR', 0.0650),
+    ('CO', 0.0290),
+    ('NC', 0.0475),
+    ('TN', 0.0700);
 
 ------------ Department ------------
 INSERT INTO department (name) VALUES
@@ -130,24 +137,46 @@ INSERT INTO department (name) VALUES
     ('Pantry'),
     ('Beverages'),
     ('Household'),
-    ('Health & Beauty');
+    ('Health & Beauty'),
+    ('Deli'),
+    ('Snacks'),
+    ('Baby'),
+    ('Pet Supplies');
 
 ------------ Store ------------
--- 12 stores with random addresses; state is picked from the tax table
+-- 100 stores with random addresses, cycling through cities in every taxed state
 INSERT INTO store (city, street, zip_code, state_code, phone_number, aisles)
 SELECT
-    (ARRAY['Houston','Austin','Dallas','San Antonio','Los Angeles','Fresno',
-           'Albany','Buffalo','Miami','Tampa','Baton Rouge','Tulsa'])[n],
+    c.city,
     (100 + floor(random() * 9900))::int || ' ' ||
         (ARRAY['Main St','Oak Ave','Elm St','Park Blvd','Market St',
                'Cedar Ln','Lakeview Dr','Washington Ave'])[1 + floor(random() * 8)::int],
     lpad((10000 + floor(random() * 89999))::int::text, 5, '0'),
-    (ARRAY['TX','TX','TX','TX','CA','CA','NY','NY','FL','FL','LA','OK'])[n],
+    c.state_code,
     '(' || (200 + floor(random() * 800))::int || ') '
         || (200 + floor(random() * 800))::int || '-'
         || lpad(floor(random() * 10000)::int::text, 4, '0'),
     20 + floor(random() * 21)::int
-FROM generate_series(1, 12) AS n;
+FROM generate_series(1, 100) AS n
+JOIN (
+    SELECT row_number() OVER () AS city_no, v.*
+    FROM (VALUES
+        ('Houston','TX'), ('Austin','TX'), ('Dallas','TX'), ('San Antonio','TX'),
+        ('Fort Worth','TX'), ('El Paso','TX'),
+        ('Los Angeles','CA'), ('San Diego','CA'), ('Fresno','CA'), ('Sacramento','CA'),
+        ('Albany','NY'), ('Buffalo','NY'), ('Rochester','NY'),
+        ('Miami','FL'), ('Tampa','FL'), ('Orlando','FL'), ('Jacksonville','FL'),
+        ('Baton Rouge','LA'), ('New Orleans','LA'),
+        ('Tulsa','OK'), ('Oklahoma City','OK'),
+        ('Phoenix','AZ'), ('Tucson','AZ'),
+        ('Atlanta','GA'), ('Savannah','GA'),
+        ('Chicago','IL'), ('Springfield','IL'),
+        ('Little Rock','AR'),
+        ('Denver','CO'),
+        ('Charlotte','NC'), ('Raleigh','NC'),
+        ('Nashville','TN'), ('Memphis','TN')
+    ) AS v(city, state_code)
+) c ON c.city_no = 1 + (n - 1) % 33;
 
 ------------ Item ------------
 -- realistic item names; SKUs are generated from the row number
@@ -198,7 +227,18 @@ FROM (VALUES
     ('Trash Bags 30ct',       'Household',       false, false),
     ('Toothpaste',            'Health & Beauty', false, false),
     ('Shampoo',               'Health & Beauty', false, false),
-    ('Ibuprofen 100ct',       'Health & Beauty', false, false)
+    ('Ibuprofen 100ct',       'Health & Beauty', false, false),
+    ('Sliced Turkey Breast',  'Deli',            true,  true),
+    ('Swiss Cheese Sliced',   'Deli',            true,  true),
+    ('Rotisserie Chicken',    'Deli',            true,  false),
+    ('Potato Chips',          'Snacks',          true,  false),
+    ('Tortilla Chips',        'Snacks',          true,  false),
+    ('Chocolate Bar',         'Snacks',          false, false),
+    ('Diapers 32ct',          'Baby',            false, false),
+    ('Baby Wipes 72ct',       'Baby',            false, false),
+    ('Infant Formula',        'Baby',            true,  false),
+    ('Dry Dog Food 15lb',     'Pet Supplies',    false, false),
+    ('Cat Litter 20lb',       'Pet Supplies',    false, false)
 ) AS v(name, dept, tax_exempt, by_weight)
 JOIN department d ON d.name = v.dept;
 
