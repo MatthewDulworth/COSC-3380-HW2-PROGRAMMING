@@ -5,8 +5,175 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Supermarket Database Simulator</title>
     <link rel="stylesheet" href="home_styles.css">
+
+    <style>
+        body {
+            display: flex;
+            place-items: center;
+            justify-content: center;
+        }
+
+        .tab {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .display-none {
+            display: none;
+        }
+    </style>
 </head>
+
 <body>
+    <div class="container">
+
+        <h1>Supermarket Database Simulator </h1>
+
+        <!-- **************************************************
+        // Tabs
+        *************************************************** -->
+        <div id="tab-switcher">
+            <button id="customer-tab-btn">
+                Customer Checkout
+            </button>
+            <button id="backend-tab-btn">
+                Supermarket Backend
+            </button>
+        </div>
+
+        <div class="content">
+
+            <!-- **************************************************
+            // Customer Checkout 
+            *************************************************** -->
+            <div id="customer-tab" class="tab">
+                <h2>Customer Checkout</h2>
+
+                <label>
+                    Choose Store:
+                    <select name="" id="location-select"></select>
+                </label>
+
+                <label>
+                    Choose Item:
+                    <select name="" id="item-select"></select>
+                    <button id="add-to-cart">Add To Cart</button>
+                </label>
+
+                <button id="checkout">Checkout</button>
+
+                <label for="">
+
+                </label>
+
+                <div class="cart-display">
+
+                </div>
+            </div>
     
+            <!-- **************************************************
+            // Supermarket Backend
+            *************************************************** -->
+            <div id="backend-tab" class="tab display-none"> 
+                <h2>Backend</h2>
+                <button id="reset-btn">Refresh Tables</button>
+            </div>
+        </div>
+    </div>
 </body>
+
+<script>
+
+    // ------------------------------------------------------------------------------
+    // Nodes
+    // ------------------------------------------------------------------------------
+    let backendTab = document.getElementById("backend-tab");
+    let customerTab = document.getElementById("customer-tab");
+
+    let backendTabBtn = document.getElementById("backend-tab-btn");
+    let customerTabBtn = document.getElementById("customer-tab-btn");
+
+    let locationSelect = document.getElementById("location-select");
+    let itemSelect = document.getElementById("item-select");
+
+    let resetBtn = document.getElementById("reset-btn");
+
+    // ------------------------------------------------------------------------------
+    // State 
+    // ------------------------------------------------------------------------------
+    let locations = [];
+    let inventory = [];
+    let cart = [];
+
+    // ------------------------------------------------------------------------------
+    // Setup
+    // ------------------------------------------------------------------------------
+    resetDatabase();
+
+    // ------------------------------------------------------------------------------
+    // Tab Switching
+    // ------------------------------------------------------------------------------
+    backendTabBtn.addEventListener("click", _ => {
+        hide(customerTab);
+        show(backendTab);
+    });
+
+    customerTabBtn.addEventListener("click", _ => {
+        show(customerTab);
+        hide(backendTab);
+    });
+
+    // ------------------------------------------------------------------------------
+    // Checkout
+    // ------------------------------------------------------------------------------
+    locationSelect.addEventListener('change', e => {
+        
+    });
+
+    async function loadItems() {
+
+    }
+
+    // ------------------------------------------------------------------------------
+    // Reset
+    // ------------------------------------------------------------------------------
+    resetBtn.addEventListener("click", _ => resetDatabase());
+
+    async function resetDatabase() {
+        try {
+            const data = await fetchData('reset-tables');
+            setLocationSelect(data.stores);
+
+        } catch (error) {
+           console.error(error);
+        }
+    }
+
+    function setLocationSelect(data) {
+        console.log(data)
+
+        let options = data.map(store => new Option(
+            `${store.street}, ${store.city}, ${store.state_code}, ${store.zip_code}`, 
+            store.store_id
+        ));
+
+        locationSelect.replaceChildren(...options);
+    }
+
+    // ------------------------------------------------------------------------------
+    // Helpers
+    // ------------------------------------------------------------------------------
+    function hide(node) {
+        node.classList.add("display-none");
+    }
+
+    function show(node) {
+        node.classList.remove("display-none");
+    }
+
+    async function fetchData(endpoint) {
+        const response = await fetch(`http://localhost:3000/${endpoint}`, {method: 'POST'});
+        return await response.json();
+    }
+</script>
 </html>

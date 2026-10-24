@@ -203,22 +203,51 @@ app.post('/test-transaction', async (req, res) => {
 // ------------------------------------------------------------------------------
 // Reset Endpoint
 // ------------------------------------------------------------------------------
-app.post('/reset-backend', async (req, res) => {
+app.post('/reset-tables', async (req, res) => {
     try {
+        // Reset the supermarket database
         const ddl = fs.readFileSync(path.join(__dirname, '..', 'ddl', 'ddl.sql'), 'utf8');
         await supermarketPool.query(ddl);
         console.log('Ran ddl.sql');
 
-        return res.json({ success: true, message: 'Database reset' });
-    } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: error.message,
+        // Get the stores table
+        const queryStores = `SELECT * FROM store;`;
+        const stores = await supermarketPool.query(queryStores);
+
+        res.json({ 
+            success: true, 
+            stores: stores.rows, 
         });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// ------------------------------------------------------------------------------
+// Inventory Endpoint
+// ------------------------------------------------------------------------------
+app.post('/inventory', async (req, res) => {
+    const { storeID } = req.body;
+
+    try {
+        const queryInventory = `
+        SELECT *
+        FROM inventory 
+        JOIN item ON inventory.sku = item.sku
+        WHERE store_id=${storeID};
+        `;
+        const items = await supermarketPool.query(queryInventory);
+
+        res.json({ 
+            success: true, 
+            items: items.rows, 
+        });
+    } catch(error) {
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 
 // ------------------------------------------------------------------------------
 // Start DB
 // ------------------------------------------------------------------------------
-app.listen(3000, () => console.log('Supermarket API running on http://localhost:3000'));
+app.listen(3000, () => console.log(`Supermarket API running on http://localhost:3000`));
