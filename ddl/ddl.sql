@@ -219,55 +219,55 @@ WHERE random() < 0.85;
 
 ------------ Store Transaction ------------
 -- 600 transactions over the past 90 days; total_amount is filled in below
--- INSERT INTO store_transaction (store_id, account_id, date_and_time, total_amount, payment_method)
--- SELECT
---     t.store_id,
---     CASE WHEN t.pay = 'card' THEN 1000 + floor(random() * 300)::int END,
---     now() - random() * interval '90 days',
---     0,
---     t.pay
--- FROM (
---     SELECT
---         1 + floor(random() * (SELECT count(*) FROM store))::int AS store_id,
---         CASE WHEN random() < 0.7 THEN 'card' ELSE 'cash' END AS pay
---     FROM generate_series(1, 600)
--- ) t;
+INSERT INTO store_transaction (store_id, account_id, date_and_time, total_amount, payment_method)
+SELECT
+    t.store_id,
+    CASE WHEN t.pay = 'card' THEN 1000 + floor(random() * 300)::int END,
+    now() - random() * interval '90 days',
+    0,
+    t.pay
+FROM (
+    SELECT
+        1 + floor(random() * (SELECT count(*) FROM store))::int AS store_id,
+        CASE WHEN random() < 0.7 THEN 'card' ELSE 'cash' END AS pay
+    FROM generate_series(1, 600)
+) t;
 
 ------------ Item Sale ------------
 -- 1-10 distinct items per transaction, drawn from that store's inventory
 -- at that store's price
--- INSERT INTO item_sale (transaction_id, sku, quantity_sold, unit_price)
--- SELECT
---     t.transaction_id,
---     pick.sku,
---     CASE WHEN pick.priced_by_weight
---          THEN round((0.25 + random() * 4.75)::numeric, 3)
---          ELSE 1 + floor(random() * 4) END,
---     pick.price
--- FROM store_transaction t
--- CROSS JOIN LATERAL (
---     SELECT inv.sku, inv.price, i.priced_by_weight
---     FROM inventory inv
---     JOIN item i ON i.sku = inv.sku
---     WHERE inv.store_id = t.store_id
---     ORDER BY random()
---     LIMIT 1 + floor(random() * 10)::int + (t.transaction_id * 0)  -- correlate so it re-runs per row
--- ) pick;
+INSERT INTO item_sale (transaction_id, sku, quantity_sold, unit_price)
+SELECT
+    t.transaction_id,
+    pick.sku,
+    CASE WHEN pick.priced_by_weight
+         THEN round((0.25 + random() * 4.75)::numeric, 3)
+         ELSE 1 + floor(random() * 4) END,
+    pick.price
+FROM store_transaction t
+CROSS JOIN LATERAL (
+    SELECT inv.sku, inv.price, i.priced_by_weight
+    FROM inventory inv
+    JOIN item i ON i.sku = inv.sku
+    WHERE inv.store_id = t.store_id
+    ORDER BY random()
+    LIMIT 1 + floor(random() * 10)::int + (t.transaction_id * 0)  -- correlate so it re-runs per row
+) pick;
 
 ------------ Transaction totals ------------
 -- total = sum of line items, plus the store's state tax on non-exempt items
--- UPDATE store_transaction t
--- SET total_amount = totals.total
--- FROM (
---     SELECT
---         s.transaction_id,
---         round(sum(s.quantity_sold * s.unit_price
---                   * CASE WHEN i.tax_exempt THEN 1 ELSE 1 + tx.tax_rate END), 2) AS total
---     FROM item_sale s
---     JOIN item i ON i.sku = s.sku
---     JOIN store_transaction st ON st.transaction_id = s.transaction_id
---     JOIN store st2 ON st2.store_id = st.store_id
---     JOIN tax tx ON tx.state_code = st2.state_code
---     GROUP BY s.transaction_id
--- ) totals
--- WHERE t.transaction_id = totals.transaction_id;
+UPDATE store_transaction t
+SET total_amount = totals.total
+FROM (
+    SELECT
+        s.transaction_id,
+        round(sum(s.quantity_sold * s.unit_price
+                  * CASE WHEN i.tax_exempt THEN 1 ELSE 1 + tx.tax_rate END), 2) AS total
+    FROM item_sale s
+    JOIN item i ON i.sku = s.sku
+    JOIN store_transaction st ON st.transaction_id = s.transaction_id
+    JOIN store st2 ON st2.store_id = st.store_id
+    JOIN tax tx ON tx.state_code = st2.state_code
+    GROUP BY s.transaction_id
+) totals
+WHERE t.transaction_id = totals.transaction_id;

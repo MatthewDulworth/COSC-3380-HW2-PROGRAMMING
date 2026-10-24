@@ -64,6 +64,9 @@
             <button id="backend-tab-btn">
                 Supermarket Backend
             </button>
+            <button id="bank-tab-btn">
+                Bank
+            </button>
         </div>
 
         <div class="content">
@@ -124,6 +127,16 @@
                 <h2>Backend</h2>
                 <button id="reset-btn">Refresh Tables</button>
             </div>
+
+            <!-- **************************************************
+            // Bank
+            *************************************************** -->
+            <div id="bank-tab" class="tab display-none">
+                <h2>Bank</h2>
+                <button id="bank-reset-btn">Refresh Bank Tables</button>
+
+                <div id="bank-message-box" class="message display-none"></div>
+            </div>
         </div>
     </div>
 </body>
@@ -135,9 +148,11 @@
     // ------------------------------------------------------------------------------
     let backendTab = document.getElementById("backend-tab");
     let customerTab = document.getElementById("customer-tab");
+    let bankTab = document.getElementById("bank-tab");
 
     let backendTabBtn = document.getElementById("backend-tab-btn");
     let customerTabBtn = document.getElementById("customer-tab-btn");
+    let bankTabBtn = document.getElementById("bank-tab-btn");
 
     let locationSelect = document.getElementById("location-select");
     let itemSelect = document.getElementById("item-select");
@@ -154,6 +169,9 @@
     let resetBtn = document.getElementById("reset-btn");
     let simulateBtn = document.getElementById("simulate-btn");
 
+    let bankResetBtn = document.getElementById("bank-reset-btn");
+    let bankMessageBox = document.getElementById("bank-message-box");
+
     // ------------------------------------------------------------------------------
     // State 
     // ------------------------------------------------------------------------------
@@ -164,24 +182,39 @@
     // ------------------------------------------------------------------------------
     // Setup
     // ------------------------------------------------------------------------------
-    resetDatabase();
+    loadStores();
 
     // ------------------------------------------------------------------------------
     // Tab Switching
     // ------------------------------------------------------------------------------
-    backendTabBtn.addEventListener("click", () => {
-        hide(customerTab);
-        show(backendTab);
-    });
+    backendTabBtn.addEventListener("click", () => switchTab(backendTab));
+    customerTabBtn.addEventListener("click", () => switchTab(customerTab));
+    bankTabBtn.addEventListener("click", () => switchTab(bankTab));
 
-    customerTabBtn.addEventListener("click", () => {
-        show(customerTab);
-        hide(backendTab);
-    });
+    function switchTab(tab) {
+        [customerTab, backendTab, bankTab].forEach(hide);
+        show(tab);
+    }
 
     // ------------------------------------------------------------------------------
     // Select Store and Items
     // ------------------------------------------------------------------------------
+    async function loadStores() {
+        try {
+            const data = await postJSON('stores');
+            if (!data.success) throw new Error(data.message);
+
+            setLocationSelect(data.stores);
+            cart = [];
+            renderCart();
+            await loadItems();
+
+        } catch (error) {
+            console.error(error);
+            showMessage(`Could not load stores: ${error.message}. Try Refresh Tables on the backend tab.`);
+        }
+    }
+
     // Inventory is per store, so switching stores empties the cart
     locationSelect.addEventListener('change', () => {
         cart = [];
@@ -373,15 +406,38 @@
     resetBtn.addEventListener("click", _ => resetDatabase());
 
     async function resetDatabase() {
+        if (!confirm('This deletes all supermarket data and regenerates it. Continue?')) return;
+
         try {
             const data = await postJSON('reset-tables');
-            setLocationSelect(data.stores);
-            cart = [];
-            renderCart();
-            await loadItems();
+            if (!data.success) throw new Error(data.message);
+
+            clearMessage();
+            await loadStores();
 
         } catch (error) {
-           console.error(error);
+            console.error(error);
+            showMessage(`Refresh failed: ${error.message}`);
+        }
+    }
+
+    // ------------------------------------------------------------------------------
+    // Bank Reset
+    // ------------------------------------------------------------------------------
+    bankResetBtn.addEventListener("click", _ => resetBank());
+
+    async function resetBank() {
+        if (!confirm('This deletes all bank accounts and regenerates them. Continue?')) return;
+
+        try {
+            const data = await postJSON('reset-bank');
+            if (!data.success) throw new Error(data.message);
+
+            showMessage(`Bank tables refreshed: ${data.accountCount} accounts.`, 'success', bankMessageBox);
+
+        } catch (error) {
+            console.error(error);
+            showMessage(`Bank refresh failed: ${error.message}`, 'error', bankMessageBox);
         }
     }
 
@@ -459,11 +515,11 @@
         node.classList.remove("display-none");
     }
 
-    function showMessage(text, type = 'error') {
-        messageBox.textContent = text;
-        messageBox.classList.remove('error', 'success');
-        messageBox.classList.add(type);
-        show(messageBox);
+    function showMessage(text, type = 'error', box = messageBox) {
+        box.textContent = text;
+        box.classList.remove('error', 'success');
+        box.classList.add(type);
+        show(box);
     }
 
     // Inclusive on both ends

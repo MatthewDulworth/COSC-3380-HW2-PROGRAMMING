@@ -277,13 +277,46 @@ app.post('/reset-tables', async (req, res) => {
         await supermarketPool.query(ddl);
         console.log('Ran ddl.sql');
 
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// ------------------------------------------------------------------------------
+// Stores Endpoint
+// ------------------------------------------------------------------------------
+app.post('/stores', async (req, res) => {
+    try {
         // Get the stores table
-        const queryStores = `SELECT * FROM store;`;
+        const queryStores = `SELECT * FROM store ORDER BY store_id;`;
         const stores = await supermarketPool.query(queryStores);
 
-        res.json({ 
-            success: true, 
-            stores: stores.rows, 
+        res.json({
+            success: true,
+            stores: stores.rows,
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// ------------------------------------------------------------------------------
+// Bank Reset Endpoint
+// ------------------------------------------------------------------------------
+app.post('/reset-bank', async (req, res) => {
+    try {
+        // Reset the bank database
+        const ddl = fs.readFileSync(path.join(__dirname, '..', 'ddl', 'bankddl.sql'), 'utf8');
+        await bankPool.query(ddl);
+        console.log('Ran bankddl.sql');
+
+        const queryAccounts = `SELECT count(*)::int AS count FROM account;`;
+        const accounts = await bankPool.query(queryAccounts);
+
+        res.json({
+            success: true,
+            accountCount: accounts.rows[0].count,
         });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
