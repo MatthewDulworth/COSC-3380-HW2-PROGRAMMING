@@ -2,6 +2,7 @@ const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 
 // Load DB_* settings from src/.env into process.env
 process.loadEnvFile(path.join(__dirname, '.env'));
@@ -28,9 +29,8 @@ const bankPool = new Pool({
 });
 
 // ------------------------------------------------------------------------------
-// Test Transaction
+// Test Transaction Endpoint
 // ------------------------------------------------------------------------------
-
 // Endpoint to test a transaction with 1 item
 app.post('/test-transaction', async (req, res) => {
     const { storeId, sku, quantity, paymentMethod, accountId } = req.body;
@@ -200,4 +200,25 @@ app.post('/test-transaction', async (req, res) => {
     }
 });
 
+// ------------------------------------------------------------------------------
+// Reset Endpoint
+// ------------------------------------------------------------------------------
+app.post('/reset-backend', async (req, res) => {
+    try {
+        const ddl = fs.readFileSync(path.join(__dirname, '..', 'ddl', 'ddl.sql'), 'utf8');
+        await supermarketPool.query(ddl);
+        console.log('Ran ddl.sql');
+
+        return res.json({ success: true, message: 'Database reset' });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+});
+
+// ------------------------------------------------------------------------------
+// Start DB
+// ------------------------------------------------------------------------------
 app.listen(3000, () => console.log('Supermarket API running on http://localhost:3000'));
