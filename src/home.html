@@ -43,6 +43,19 @@
             border-color: #9fd3b0;
         }
 
+        /* 300 accounts is too tall for the page, so the table scrolls */
+        .accounts-display {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        /* Keep the column names visible while the rows scroll under them */
+        .accounts-display th {
+            position: sticky;
+            top: 0;
+            background: Canvas;
+        }
+
         .display-none {
             display: none;
         }
@@ -125,7 +138,7 @@
             *************************************************** -->
             <div id="backend-tab" class="tab display-none"> 
                 <h2>Backend</h2>
-                <button id="reset-btn">Refresh Tables</button>
+                <button id="reset-btn">Reset Supermarket Tables</button>
             </div>
 
             <!-- **************************************************
@@ -133,7 +146,14 @@
             *************************************************** -->
             <div id="bank-tab" class="tab display-none">
                 <h2>Bank</h2>
-                <button id="bank-reset-btn">Refresh Bank Tables</button>
+
+                <hr>
+
+                <div id="accounts-display" class="accounts-display"></div>
+
+                <hr>
+
+                <button id="bank-reset-btn">Reset Bank Tables</button>
 
                 <div id="bank-message-box" class="message display-none"></div>
             </div>
@@ -171,6 +191,7 @@
 
     let bankResetBtn = document.getElementById("bank-reset-btn");
     let bankMessageBox = document.getElementById("bank-message-box");
+    let accountsDisplay = document.getElementById("accounts-display");
 
     // ------------------------------------------------------------------------------
     // State 
@@ -189,7 +210,11 @@
     // ------------------------------------------------------------------------------
     backendTabBtn.addEventListener("click", () => switchTab(backendTab));
     customerTabBtn.addEventListener("click", () => switchTab(customerTab));
-    bankTabBtn.addEventListener("click", () => switchTab(bankTab));
+    // Balances change with every card checkout, so reload them each time the tab opens
+    bankTabBtn.addEventListener("click", () => {
+        switchTab(bankTab);
+        loadAccounts();
+    });
 
     function switchTab(tab) {
         [customerTab, backendTab, bankTab].forEach(hide);
@@ -434,6 +459,7 @@
             if (!data.success) throw new Error(data.message);
 
             showMessage(`Bank tables refreshed: ${data.accountCount} accounts.`, 'success', bankMessageBox);
+            await loadAccounts();
 
         } catch (error) {
             console.error(error);
@@ -442,11 +468,61 @@
     }
 
     // ------------------------------------------------------------------------------
+    // Bank Accounts
+    // ------------------------------------------------------------------------------
+    async function loadAccounts() {
+        try {
+            const data = await postJSON('accounts');
+            if (!data.success) throw new Error(data.message);
+            renderAccounts(data.accounts);
+
+        } catch (error) {
+            console.error(error);
+            accountsDisplay.replaceChildren();
+            showMessage(`Could not load accounts: ${error.message}. Try Refresh Bank Tables.`, 'error', bankMessageBox);
+        }
+    }
+
+    function renderAccounts(accounts) {
+        if (accounts.length === 0) {
+            accountsDisplay.replaceChildren('No bank accounts.');
+            return;
+        }
+
+        const table = document.createElement('table');
+        table.innerHTML = `
+            <thead>
+                <tr><th>Account Number</th><th>Balance</th></tr>
+            </thead>
+        `;
+
+        const tbody = document.createElement('tbody');
+        for (const a of accounts) {
+            const row = document.createElement('tr');
+
+            [
+                a.account_number,
+                `$${Number(a.balance).toFixed(2)}`,
+            ].forEach(text => {
+                const td = document.createElement('td');
+                td.textContent = text;
+                row.appendChild(td);
+            });
+
+            tbody.appendChild(row);
+        }
+        table.appendChild(tbody);
+
+        accountsDisplay.replaceChildren(table);
+    }
+
+    // ------------------------------------------------------------------------------
     // Simulation
     // ------------------------------------------------------------------------------
     simulateBtn.addEventListener("click", () => simulateCheckout());
 
-    // Checks out 10-20 random in-stock items from a random store, paid in cash
+    // Checks out 10-20 random in-stock items from a random store,
+    // paid by card from a random bank account 70% of the time, otherwise cash
     async function simulateCheckout() {
         try {
             const store = locations[randomInt(0, locations.length - 1)];
@@ -467,20 +543,33 @@
                 return { sku: i.sku, name: i.name, quantity };
             });
 
+            let paymentMethod = 'cash';
+            let accountId;
+            if (Math.random() < 0.7) {
+                const bank = await postJSON('accounts');
+                if (!bank.success) throw new Error(bank.message);
+                if (bank.accounts.length === 0) throw new Error('No bank accounts');
+
+                paymentMethod = 'card';
+                accountId = bank.accounts[randomInt(0, bank.accounts.length - 1)].account_number;
+            }
+            const payment = paymentMethod === 'card' ? `card, account ${accountId}` : 'cash';
+
             const result = await postJSON('test-transaction', {
                 storeId: store.store_id,
                 items: items.map(({ sku, quantity }) => ({ sku, quantity })),
-                paymentMethod: 'cash',
+                paymentMethod,
+                accountId,
             });
 
             if (result.error || !result.success) {
-                throw new Error(result.error ?? result.message);
+                throw new Error(`${result.error ?? result.message} (${payment})`);
             }
 
             console.table(items);
             showMessage(
                 `Transaction #${result.transactionId} at ${store.street}, ${store.city}: ` +
-                `${items.length} items, total $${result.total} (cash).`,
+                `${items.length} items, total $${result.total} (${payment}).`,
                 'success'
             );
 

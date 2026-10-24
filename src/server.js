@@ -284,6 +284,27 @@ app.post('/reset-tables', async (req, res) => {
 });
 
 // ------------------------------------------------------------------------------
+// Bank Accounts Endpoint
+// ------------------------------------------------------------------------------
+app.post('/accounts', async (req, res) => {
+    try {
+        const queryAccounts = `
+        SELECT account_number, balance
+        FROM account
+        ORDER BY account_number;
+        `;
+        const accounts = await bankPool.query(queryAccounts);
+
+        res.json({
+            success: true,
+            accounts: accounts.rows,
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// ------------------------------------------------------------------------------
 // Stores Endpoint
 // ------------------------------------------------------------------------------
 app.post('/stores', async (req, res) => {
