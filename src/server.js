@@ -28,7 +28,6 @@ const bankPool = new Pool({
     port: process.env.DB_PORT,
 });
 
-
 // ------------------------------------------------------------------------------
 // Test Transaction Endpoint
 // ------------------------------------------------------------------------------
@@ -42,21 +41,19 @@ app.post('/test-transaction', async (req, res) => {
     }
 
     // Validate Items
-    if (!Array.isArray(items) || items.length === 0){
+    if (!Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'Invalid item array' });
     }
-
 
     // Sku into array
     const combinedItems = new Map();
 
     for (const purchasedItem of items) {
-        if (!purchasedItem || 
+        if (!purchasedItem ||
             typeof purchasedItem.sku !== 'string' ||
             !purchasedItem.sku.trim()) {
             return res.status(400).json({ error: 'Invalid SKU' });
         }
-
 
         const quantity = purchasedItem.quantity;
 
@@ -64,28 +61,27 @@ app.post('/test-transaction', async (req, res) => {
             !Number.isFinite(quantity) ||
             quantity <= 0 ||
             Math.abs(quantity * 1000 - Math.round(quantity * 1000)) > 1e-7) {
-            return res.status(400).json({ error: 'Invalid quantity'  });
+            return res.status(400).json({ error: 'Invalid quantity' });
         }
 
-        const sku = purchasedItem.sku.trim()
+        const sku = purchasedItem.sku.trim();
 
         const quantityUnits = Math.round(quantity * 1000);
 
         if (!Number.isSafeInteger(quantityUnits) ||
             quantityUnits <= 0) {
             return res.status(400).json({ error: 'Invalid quantity' });
-            
         }
-        
+
         const previousUnits = combinedItems.get(sku) || 0;
         const newUnits = previousUnits + quantityUnits;
-        
-        if(!Number.isSafeInteger(newUnits)){
-            return res.status(400).json({ error: 'Quantity too large' })
+
+        if (!Number.isSafeInteger(newUnits)) {
+            return res.status(400).json({ error: 'Quantity too large' });
         }
 
         combinedItems.set(sku, newUnits);
-    } 
+    }
 
     // Validate payment method
     if (paymentMethod !== 'card' && paymentMethod !== 'cash') {
@@ -100,7 +96,7 @@ app.post('/test-transaction', async (req, res) => {
     const cart = Array.from(combinedItems, ([sku, units]) => ({
         sku,
         quantity: units / 1000
-    })).sort((a,b) => a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0);
+    })).sort((a, b) => a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0);
 
     let client;
     let bankClient;
@@ -115,27 +111,25 @@ app.post('/test-transaction', async (req, res) => {
             await bankClient.query('BEGIN');
         }
 
-
         const validatedItems = [];
         const lineTotals = [];
 
-
-       for (const purchasedItem of cart) {
+        for (const purchasedItem of cart) {
             // Retrieve item information, inventory, and tax rate
             const storeResult = await client.query(`
-            SELECT
-                inv.price,
-                inv.quantity_in_stock,
-                i.tax_exempt,
-                i.priced_by_weight,
-                t.tax_rate
-            FROM inventory inv
-            JOIN item AS i ON inv.sku = i.sku
-            JOIN store AS s ON inv.store_id = s.store_id
-            JOIN tax AS t ON s.state_code = t.state_code
-            WHERE inv.store_id = $1 AND inv.sku = $2
-            FOR UPDATE OF inv
-        `, [storeId, purchasedItem.sku]);
+                SELECT
+                    inv.price,
+                    inv.quantity_in_stock,
+                    i.tax_exempt,
+                    i.priced_by_weight,
+                    t.tax_rate
+                FROM inventory inv
+                JOIN item AS i ON inv.sku = i.sku
+                JOIN store AS s ON inv.store_id = s.store_id
+                JOIN tax AS t ON s.state_code = t.state_code
+                WHERE inv.store_id = $1 AND inv.sku = $2
+                FOR UPDATE OF inv
+            `, [storeId, purchasedItem.sku]);
 
             if (storeResult.rows.length === 0) {
                 throw new Error(
@@ -159,17 +153,17 @@ app.post('/test-transaction', async (req, res) => {
 
             // Calculate total price including applicable sales tax
             const lineResult = await client.query(`
-            SELECT ROUND(
-                $1::NUMERIC * $2::NUMERIC *
-                (1 + CASE WHEN $3::BOOLEAN THEN 0 ELSE $4::NUMERIC END),
-                2
-            ) AS line_total
-        `, [item.price, purchasedItem.quantity, item.tax_exempt, item.tax_rate]);
+                SELECT ROUND(
+                    $1::NUMERIC * $2::NUMERIC *
+                    (1 + CASE WHEN $3::BOOLEAN THEN 0 ELSE $4::NUMERIC END),
+                    2
+                ) AS line_total
+            `, [item.price, purchasedItem.quantity, item.tax_exempt, item.tax_rate]);
 
             // Save calculated total
             lineTotals.push(lineResult.rows[0].line_total);
 
-            //
+            // Save the item for the inserts below
             validatedItems.push({
                 sku: purchasedItem.sku,
                 quantity: purchasedItem.quantity,
@@ -184,8 +178,8 @@ app.post('/test-transaction', async (req, res) => {
                 0
             ) AS total
             FROM UNNEST($1::NUMERIC[]) AS amounts(amount)
-            `, [lineTotals]);
-        
+        `, [lineTotals]);
+
         // Get the calculated total
         const total = totalResult.rows[0].total;
 
@@ -223,7 +217,7 @@ app.post('/test-transaction', async (req, res) => {
                     (transaction_id, sku, quantity_sold, unit_price)
                 VALUES ($1, $2, $3, $4)
             `, [transactionId, purchasedItem.sku, purchasedItem.quantity, purchasedItem.price]);
-            
+
             // Subtract purchased quantity from store inventory
             await client.query(`
                 UPDATE inventory
@@ -277,30 +271,29 @@ app.post('/test-transaction', async (req, res) => {
 // ------------------------------------------------------------------------------
 // Retrieve monthly sales data
 app.get('/reports/monthly-sales', async (req, res) => {
-
-try {
-    const result = await supermarketPool.query(`
-        SELECT 
-            s.store_id,
-            s.city,
-            s.state_code,
-            DATE_TRUNC('month', t.date_and_time)::DATE
-                AS sales_month,
-            COUNT(t.transaction_id)
-                AS total_transactions,
-            SUM(t.total_amount)
-                AS total_revenue,
-            ROUND(AVG(t.total_amount), 2)
-                AS average_transaction
-        FROM store_transaction AS t
-        JOIN store AS s ON t.store_id = s.store_id
-        GROUP BY
-            s.store_id,
-            s.city,
-            s.state_code,
-            DATE_TRUNC('month', t.date_and_time)
-        ORDER BY sales_month DESC, total_revenue DESC;
-        `)
+    try {
+        const result = await supermarketPool.query(`
+            SELECT
+                s.store_id,
+                s.city,
+                s.state_code,
+                DATE_TRUNC('month', t.date_and_time)::DATE
+                    AS sales_month,
+                COUNT(t.transaction_id)
+                    AS total_transactions,
+                SUM(t.total_amount)
+                    AS total_revenue,
+                ROUND(AVG(t.total_amount), 2)
+                    AS average_transaction
+            FROM store_transaction AS t
+            JOIN store AS s ON t.store_id = s.store_id
+            GROUP BY
+                s.store_id,
+                s.city,
+                s.state_code,
+                DATE_TRUNC('month', t.date_and_time)
+            ORDER BY sales_month DESC, total_revenue DESC;
+        `);
 
         console.log(`Monthly sales report: ${result.rows.length} rows`);
 
@@ -308,7 +301,6 @@ try {
             success: true,
             sales: result.rows
         });
-
     } catch (error) {
         console.error(`Monthly sales report failed: ${error.message}`);
         return res.status(500).json({
@@ -317,7 +309,6 @@ try {
         });
     }
 });
-
 
 // ------------------------------------------------------------------------------
 // Reset Endpoint
@@ -342,9 +333,9 @@ app.post('/reset-tables', async (req, res) => {
 app.post('/accounts', async (req, res) => {
     try {
         const queryAccounts = `
-        SELECT account_number, balance
-        FROM account
-        ORDER BY account_number;
+            SELECT account_number, balance
+            FROM account
+            ORDER BY account_number;
         `;
         const accounts = await bankPool.query(queryAccounts);
         console.log(`Loaded ${accounts.rows.length} bank accounts`);
@@ -366,9 +357,9 @@ app.post('/stores', async (req, res) => {
     try {
         // Get the stores table
         const queryStores = `
-        SELECT * 
-        FROM store 
-        ORDER BY store_id;
+            SELECT *
+            FROM store
+            ORDER BY store_id;
         `;
         const stores = await supermarketPool.query(queryStores);
         console.log(`Loaded ${stores.rows.length} stores`);
@@ -414,10 +405,10 @@ app.post('/inventory', async (req, res) => {
 
     try {
         const queryInventory = `
-        SELECT *
-        FROM inventory 
-        JOIN item ON inventory.sku = item.sku
-        WHERE store_id=${storeID};
+            SELECT *
+            FROM inventory
+            JOIN item ON inventory.sku = item.sku
+            WHERE store_id = ${storeID};
         `;
         const items = await supermarketPool.query(queryInventory);
         console.log(`Loaded ${items.rows.length} inventory items for store ${storeID}`);
@@ -426,7 +417,7 @@ app.post('/inventory', async (req, res) => {
             success: true,
             items: items.rows,
         });
-    } catch(error) {
+    } catch (error) {
         console.error(`Loading inventory for store ${storeID} failed: ${error.message}`);
         res.status(500).json({ success: false, message: error.message });
     }
