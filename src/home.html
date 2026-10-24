@@ -156,9 +156,17 @@
 
                 <div id="report-btns">
                     <button id="monthly-sales-btn" data-report="monthlySales">Monthly Sales Report</button>
-                    <button id="top-sales-btn">Top Sales By Department</button>
+                    <button id="top-sales-btn" data-report="topSellingItems">Top Selling Item per Department</button>
                 </div>
-                
+
+                <!-- Only shown for reports with storeFilter: true -->
+                <div id="report-store-filter" class="display-none">
+                    <label for="report-store-select">Store</label>
+                    <select id="report-store-select">
+                        <option value="">All stores</option>
+                    </select>
+                </div>
+
                 <div id="report-title"></div>
                     
                 <div id="report-display" class="report-display"></div>
@@ -217,6 +225,8 @@
     let bankMessageBox = document.getElementById("bank-message-box");
     let accountsDisplay = document.getElementById("accounts-display");
 
+    let reportStoreFilter = document.getElementById("report-store-filter");
+    let reportStoreSelect = document.getElementById("report-store-select");
     let reportTitle = document.getElementById("report-title");
     let reportDisplay = document.getElementById("report-display");
 
@@ -479,13 +489,14 @@
     // Reports
     // ------------------------------------------------------------------------------
     // To add a report: add an entry here, a server endpoint that returns
-    // { success, rows }, and a button with data-report="<key>"
+    // { success, <rowsKey> }, and a button with data-report="<key>"
     const money = n => `$${Number(n).toFixed(2)}`;
 
     const REPORTS = {
         monthlySales: {
             title: 'Monthly Sales',
-            endpoint: 'reports/monthly-sales',
+            load: () => postJSON('reports/monthly-sales'),
+            rowsKey: 'rows',
             columns: [
                 ['Month', r => r.sales_month.slice(0, 7)],
                 ['Store', r => `${r.street}, ${r.city}, ${r.state_code}, ${r.zip_code}`],
@@ -494,21 +505,50 @@
                 ['Avg Transaction', r => money(r.average_transaction)],
             ],
         },
+        topSellingItems: {
+            title: 'Top Selling Item per Department',
+            storeFilter: true,
+            // Blank store select means all stores
+            load:() => getJSON('reports/top-selling-items' +
+                (reportStoreSelect.value ? `?storeId=${reportStoreSelect.value}` : '')),
+            rowsKey: 'items',
+            columns: [
+                ['Department', r => r.department_name],
+                ['SKU', r => r.sku],
+                ['Item', r => r.item_name],
+                ['Quantity Sold', r => Number(r.total_quantity_sold)],
+                ['Revenue', r => money(r.total_revenue)],
+            ],
+        },
     };
 
+    let currentReport = null;
+
+    // Clicking a report button always starts from all stores
     document.querySelectorAll("[data-report]").forEach(btn =>
-        btn.addEventListener("click", () => runReport(REPORTS[btn.dataset.report]))
+        btn.addEventListener("click", () => {
+            currentReport = REPORTS[btn.dataset.report];
+            reportStoreSelect.value = '';
+
+            if (currentReport.storeFilter) show(reportStoreFilter);
+            else hide(reportStoreFilter);
+
+            runReport(currentReport);
+        })
     );
+
+    // Picking a store reruns the report that is showing the filter
+    reportStoreSelect.addEventListener('change', () => runReport(currentReport));
 
     async function runReport(report) {
         reportTitle.textContent = report.title;
         reportDisplay.replaceChildren('Loading...');
 
         try {
-            const data = await postJSON(report.endpoint);
-            if (!data.success) throw new Error(data.message);
+            const data = await report.load();
+            if (!data.success) throw new Error(data.message || data.error);
 
-            renderReport(report, data.rows);
+            renderReport(report, data[report.rowsKey]);
 
         } catch (error) {
             console.error(error);
@@ -694,6 +734,12 @@
         ));
 
         locationSelect.replaceChildren(...options);
+
+        // Same stores for the report filter; an <option> can only live in one select
+        reportStoreSelect.replaceChildren(
+            new Option('All stores', ''),
+            ...options.map(option => option.cloneNode(true))
+        );
     }
 
     // ------------------------------------------------------------------------------
@@ -744,6 +790,11 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
         });
+        return await response.json();
+    }
+
+    async function getJSON(endpoint) {
+        const response = await fetch(`http://localhost:3000/${endpoint}`);
         return await response.json();
     }
 </script>
