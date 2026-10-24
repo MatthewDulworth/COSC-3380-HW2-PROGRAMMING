@@ -112,6 +112,7 @@
                 </label>
 
                 <button id="checkout-btn">Checkout</button>
+                <button id="simulate-btn">Simulate Random Checkout</button>
 
                 <div id="message-box" class="message display-none"></div>
             </div>
@@ -151,6 +152,7 @@
     let messageBox = document.getElementById("message-box");
 
     let resetBtn = document.getElementById("reset-btn");
+    let simulateBtn = document.getElementById("simulate-btn");
 
     // ------------------------------------------------------------------------------
     // State 
@@ -383,6 +385,58 @@
         }
     }
 
+    // ------------------------------------------------------------------------------
+    // Simulation
+    // ------------------------------------------------------------------------------
+    simulateBtn.addEventListener("click", () => simulateCheckout());
+
+    // Checks out 10-20 random in-stock items from a random store, paid in cash
+    async function simulateCheckout() {
+        try {
+            const store = locations[randomInt(0, locations.length - 1)];
+            if (!store) throw new Error('No stores loaded');
+
+            const data = await postJSON('inventory', { storeID: store.store_id });
+            if (!data.success) throw new Error(data.message);
+
+            const inStock = data.items.filter(i => Number(i.quantity_in_stock) >= (i.priced_by_weight ? 0.001 : 1));
+            const count = Math.min(randomInt(10, 20), inStock.length);
+            if (count === 0) throw new Error('Store has no items in stock');
+
+            const items = shuffle(inStock).slice(0, count).map(i => {
+                const stock = Number(i.quantity_in_stock);
+                const quantity = i.priced_by_weight
+                    ? Math.min(round(randomInt(100, 3000) / 1000, 3), stock)  // 0.1 - 3 lb
+                    : randomInt(1, Math.min(5, Math.floor(stock)));
+                return { sku: i.sku, name: i.name, quantity };
+            });
+
+            const result = await postJSON('test-transaction', {
+                storeId: store.store_id,
+                items: items.map(({ sku, quantity }) => ({ sku, quantity })),
+                paymentMethod: 'cash',
+            });
+
+            if (result.error || !result.success) {
+                throw new Error(result.error ?? result.message);
+            }
+
+            console.table(items);
+            showMessage(
+                `Transaction #${result.transactionId} at ${store.street}, ${store.city}: ` +
+                `${items.length} items, total $${result.total} (cash).`,
+                'success'
+            );
+
+            // Stock changed, so refresh the checkout tab's item list
+            await loadItems();
+
+        } catch (error) {
+            console.error(error);
+            showMessage(`Simulation failed: ${error.message}`);
+        }
+    }
+
     function setLocationSelect(data) {
         locations = Array.from(data);
 
@@ -410,6 +464,21 @@
         messageBox.classList.remove('error', 'success');
         messageBox.classList.add(type);
         show(messageBox);
+    }
+
+    // Inclusive on both ends
+    function randomInt(min, max) {
+        return min + Math.floor(Math.random() * (max - min + 1));
+    }
+
+    // Fisher-Yates shuffle on a copy
+    function shuffle(array) {
+        const copy = [...array];
+        for (let i = copy.length - 1; i > 0; i--) {
+            const j = randomInt(0, i);
+            [copy[i], copy[j]] = [copy[j], copy[i]];
+        }
+        return copy;
     }
 
     function clearMessage() {
