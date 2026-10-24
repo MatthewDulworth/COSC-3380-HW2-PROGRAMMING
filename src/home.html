@@ -16,6 +16,7 @@
         .tab {
             display: flex;
             flex-direction: column;
+            gap: 10px;
         }
 
         .display-none {
@@ -57,18 +58,23 @@
                 <label>
                     Choose Item:
                     <select name="" id="item-select"></select>
-                    <button id="add-to-cart">Add To Cart</button>
                 </label>
 
-                <button id="checkout">Checkout</button>
+                <label>
+                    <span id="quantity-label">Quantity:</span>
+                    <input type="number" id="quantity-input" min="1" step="1" value="1">
+                    <button id="add-to-cart">Add To Cart</button>
+                </label>
 
                 <label for="">
 
                 </label>
 
-                <div class="cart-display">
+                <div id="cart-display" class="cart-display">
 
                 </div>
+
+                <button id="checkout">Checkout</button>
             </div>
     
             <!-- **************************************************
@@ -95,6 +101,10 @@
 
     let locationSelect = document.getElementById("location-select");
     let itemSelect = document.getElementById("item-select");
+    let quantityLabel = document.getElementById("quantity-label");
+    let quantityInput = document.getElementById("quantity-input");
+    let addToCartBtn = document.getElementById("add-to-cart");
+    let cartDisplay = document.getElementById("cart-display");
 
     let resetBtn = document.getElementById("reset-btn");
 
@@ -126,12 +136,139 @@
     // ------------------------------------------------------------------------------
     // Checkout
     // ------------------------------------------------------------------------------
-    locationSelect.addEventListener('change', e => {
-        
+    // Inventory is per store, so switching stores empties the cart
+    locationSelect.addEventListener('change', _ => {
+        cart = [];
+        renderCart();
+        loadItems();
     });
 
     async function loadItems() {
+        try {
+            const data = await fetchData('inventory', { storeID: Number(locationSelect.value) });
+            if (!data.success) throw new Error(data.message);
+            setItemSelect(data.items);
 
+        } catch (error) {
+            console.error(error);
+        }
+    }
+
+    function setItemSelect(data) {
+        inventory = Array.from(data);
+
+        let options = inventory.map(item => new Option(
+            `${item.name} - $${item.price}${item.priced_by_weight ? '/lb' : ''}`,
+            item.sku
+        ));
+
+        itemSelect.replaceChildren(...options);
+        setQuantityInput();
+    }
+
+    itemSelect.addEventListener('change', _ => setQuantityInput());
+
+    // Weighed items take up to 3 decimals; counted items take whole numbers
+    function setQuantityInput() {
+        const item = inventory.find(i => i.sku === itemSelect.value);
+        const byWeight = item?.priced_by_weight ?? false;
+
+        quantityLabel.textContent = byWeight ? 'Weight (lb):' : 'Quantity:';
+        quantityInput.step = byWeight ? '0.001' : '1';
+        quantityInput.min = byWeight ? '0.001' : '1';
+        quantityInput.value = 1;
+    }
+
+    // ------------------------------------------------------------------------------
+    // Cart
+    // ------------------------------------------------------------------------------
+    addToCartBtn.addEventListener('click', _ => addToCart());
+
+    function addToCart() {
+        const item = inventory.find(i => i.sku === itemSelect.value);
+        const quantity = Number(quantityInput.value);
+
+        if (!item) return;
+        if (!quantityInput.checkValidity() || quantity <= 0) {
+            alert(item.priced_by_weight
+                ? 'Enter a weight greater than 0 with at most 3 decimals.'
+                : 'Enter a whole-number quantity of at least 1.');
+            return;
+        }
+
+        const existing = cart.find(c => c.sku === item.sku);
+        const newQuantity = round((existing?.quantity ?? 0) + quantity, 3);
+
+        if (newQuantity > Number(item.quantity_in_stock)) {
+            alert(`Only ${Number(item.quantity_in_stock)} of ${item.name} in stock.`);
+            return;
+        }
+
+        if (existing) {
+            existing.quantity = newQuantity;
+        } else {
+            cart.push({
+                sku: item.sku,
+                name: item.name,
+                price: Number(item.price),
+                pricedByWeight: item.priced_by_weight,
+                quantity: newQuantity,
+            });
+        }
+
+        renderCart();
+    }
+
+    function removeFromCart(sku) {
+        cart = cart.filter(c => c.sku !== sku);
+        renderCart();
+    }
+
+    function renderCart() {
+        if (cart.length === 0) {
+            cartDisplay.replaceChildren('Cart is empty.');
+            return;
+        }
+
+        const table = document.createElement('table');
+        table.innerHTML = `
+            <thead>
+                <tr><th>Item</th><th>Qty</th><th>Unit Price</th><th>Line Total</th><th></th></tr>
+            </thead>
+        `;
+
+        const tbody = document.createElement('tbody');
+        for (const c of cart) {
+            const row = document.createElement('tr');
+            const unit = c.pricedByWeight ? '/lb' : '';
+
+            [
+                c.name,
+                c.pricedByWeight ? `${c.quantity} lb` : c.quantity,
+                `$${c.price.toFixed(2)}${unit}`,
+                `$${(c.price * c.quantity).toFixed(2)}`,
+            ].forEach(text => {
+                const td = document.createElement('td');
+                td.textContent = text;
+                row.appendChild(td);
+            });
+
+            const removeBtn = document.createElement('button');
+            removeBtn.textContent = 'Remove';
+            removeBtn.addEventListener('click', _ => removeFromCart(c.sku));
+            const td = document.createElement('td');
+            td.appendChild(removeBtn);
+            row.appendChild(td);
+
+            tbody.appendChild(row);
+        }
+        table.appendChild(tbody);
+
+        const subtotal = cart.reduce((sum, c) => sum + c.price * c.quantity, 0);
+        const subtotalLine = document.createElement('p');
+        subtotalLine.textContent = `Subtotal (before tax): $${subtotal.toFixed(2)}`;
+
+        cartDisplay.replaceChildren(table, subtotalLine);
     }
 
     // ------------------------------------------------------------------------------
@@ -143,6 +280,9 @@
         try {
             const data = await fetchData('reset-tables');
             setLocationSelect(data.stores);
+            cart = [];
+            renderCart();
+            await loadItems();
 
         } catch (error) {
            console.error(error);
@@ -150,9 +290,9 @@
     }
 
     function setLocationSelect(data) {
-        console.log(data)
+        locations = Array.from(data);
 
-        let options = data.map(store => new Option(
+        let options = locations.map(store => new Option(
             `${store.street}, ${store.city}, ${store.state_code}, ${store.zip_code}`, 
             store.store_id
         ));
@@ -171,8 +311,17 @@
         node.classList.remove("display-none");
     }
 
-    async function fetchData(endpoint) {
-        const response = await fetch(`http://localhost:3000/${endpoint}`, {method: 'POST'});
+    function round(value, decimals) {
+        const factor = 10 ** decimals;
+        return Math.round(value * factor) / factor;
+    }
+
+    async function fetchData(endpoint, body = {}) {
+        const response = await fetch(`http://localhost:3000/${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
         return await response.json();
     }
 </script>
