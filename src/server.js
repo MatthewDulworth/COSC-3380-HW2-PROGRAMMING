@@ -28,7 +28,6 @@ const bankPool = new Pool({
     port: process.env.DB_PORT,
 });
 
-
 // ------------------------------------------------------------------------------
 // Test Transaction Endpoint
 // ------------------------------------------------------------------------------
@@ -42,21 +41,19 @@ app.post('/test-transaction', async (req, res) => {
     }
 
     // Validate Items
-    if (!Array.isArray(items) || items.length === 0){
+    if (!Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'Invalid item array' });
     }
-
 
     // Sku into array
     const combinedItems = new Map();
 
     for (const purchasedItem of items) {
-        if (!purchasedItem || 
+        if (!purchasedItem ||
             typeof purchasedItem.sku !== 'string' ||
             !purchasedItem.sku.trim()) {
             return res.status(400).json({ error: 'Invalid SKU' });
         }
-
 
         const quantity = purchasedItem.quantity;
 
@@ -64,28 +61,27 @@ app.post('/test-transaction', async (req, res) => {
             !Number.isFinite(quantity) ||
             quantity <= 0 ||
             Math.abs(quantity * 1000 - Math.round(quantity * 1000)) > 1e-7) {
-            return res.status(400).json({ error: 'Invalid quantity'  });
+            return res.status(400).json({ error: 'Invalid quantity' });
         }
 
-        const sku = purchasedItem.sku.trim()
+        const sku = purchasedItem.sku.trim();
 
         const quantityUnits = Math.round(quantity * 1000);
 
         if (!Number.isSafeInteger(quantityUnits) ||
             quantityUnits <= 0) {
             return res.status(400).json({ error: 'Invalid quantity' });
-            
         }
-        
+
         const previousUnits = combinedItems.get(sku) || 0;
         const newUnits = previousUnits + quantityUnits;
-        
-        if(!Number.isSafeInteger(newUnits)){
-            return res.status(400).json({ error: 'Quantity too large' })
+
+        if (!Number.isSafeInteger(newUnits)) {
+            return res.status(400).json({ error: 'Quantity too large' });
         }
 
         combinedItems.set(sku, newUnits);
-    } 
+    }
 
     // Validate payment method
     if (paymentMethod !== 'card' && paymentMethod !== 'cash') {
@@ -100,7 +96,7 @@ app.post('/test-transaction', async (req, res) => {
     const cart = Array.from(combinedItems, ([sku, units]) => ({
         sku,
         quantity: units / 1000
-    })).sort((a,b) => a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0);
+    })).sort((a, b) => a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0);
 
     let client;
     let bankClient;
@@ -115,27 +111,25 @@ app.post('/test-transaction', async (req, res) => {
             await bankClient.query('BEGIN');
         }
 
-
         const validatedItems = [];
         const lineTotals = [];
 
-
-       for (const purchasedItem of cart) {
+        for (const purchasedItem of cart) {
             // Retrieve item information, inventory, and tax rate
             const storeResult = await client.query(`
-            SELECT
-                inv.price,
-                inv.quantity_in_stock,
-                i.tax_exempt,
-                i.priced_by_weight,
-                t.tax_rate
-            FROM inventory inv
-            JOIN item AS i ON inv.sku = i.sku
-            JOIN store AS s ON inv.store_id = s.store_id
-            JOIN tax AS t ON s.state_code = t.state_code
-            WHERE inv.store_id = $1 AND inv.sku = $2
-            FOR UPDATE OF inv
-        `, [storeId, purchasedItem.sku]);
+                SELECT
+                    inv.price,
+                    inv.quantity_in_stock,
+                    i.tax_exempt,
+                    i.priced_by_weight,
+                    t.tax_rate
+                FROM inventory inv
+                JOIN item AS i ON inv.sku = i.sku
+                JOIN store AS s ON inv.store_id = s.store_id
+                JOIN tax AS t ON s.state_code = t.state_code
+                WHERE inv.store_id = $1 AND inv.sku = $2
+                FOR UPDATE OF inv
+            `, [storeId, purchasedItem.sku]);
 
             if (storeResult.rows.length === 0) {
                 throw new Error(
@@ -159,17 +153,17 @@ app.post('/test-transaction', async (req, res) => {
 
             // Calculate total price including applicable sales tax
             const lineResult = await client.query(`
-            SELECT ROUND(
-                $1::NUMERIC * $2::NUMERIC *
-                (1 + CASE WHEN $3::BOOLEAN THEN 0 ELSE $4::NUMERIC END),
-                2
-            ) AS line_total
-        `, [item.price, purchasedItem.quantity, item.tax_exempt, item.tax_rate]);
+                SELECT ROUND(
+                    $1::NUMERIC * $2::NUMERIC *
+                    (1 + CASE WHEN $3::BOOLEAN THEN 0 ELSE $4::NUMERIC END),
+                    2
+                ) AS line_total
+            `, [item.price, purchasedItem.quantity, item.tax_exempt, item.tax_rate]);
 
             // Save calculated total
             lineTotals.push(lineResult.rows[0].line_total);
 
-            //
+            // Save the item for the inserts below
             validatedItems.push({
                 sku: purchasedItem.sku,
                 quantity: purchasedItem.quantity,
@@ -184,8 +178,8 @@ app.post('/test-transaction', async (req, res) => {
                 0
             ) AS total
             FROM UNNEST($1::NUMERIC[]) AS amounts(amount)
-            `, [lineTotals]);
-        
+        `, [lineTotals]);
+
         // Get the calculated total
         const total = totalResult.rows[0].total;
 
@@ -223,7 +217,7 @@ app.post('/test-transaction', async (req, res) => {
                     (transaction_id, sku, quantity_sold, unit_price)
                 VALUES ($1, $2, $3, $4)
             `, [transactionId, purchasedItem.sku, purchasedItem.quantity, purchasedItem.price]);
-            
+
             // Subtract purchased quantity from store inventory
             await client.query(`
                 UPDATE inventory
@@ -237,6 +231,9 @@ app.post('/test-transaction', async (req, res) => {
         }
         await client.query('COMMIT');
 
+        console.log(`Transaction #${transactionId} at store ${storeId}: ` +
+            `${validatedItems.length} items, $${total} (${paymentMethod})`);
+
         // Return successful purchase information
         return res.json({
             success: true,
@@ -246,6 +243,8 @@ app.post('/test-transaction', async (req, res) => {
             paymentMethod: paymentMethod,
         });
     } catch (error) {
+        console.error(`Transaction at store ${storeId} rolled back: ${error.message}`);
+
         if (client) {
             await client.query('ROLLBACK').catch(console.error);
         }
@@ -268,6 +267,200 @@ app.post('/test-transaction', async (req, res) => {
 });
 
 // ------------------------------------------------------------------------------
+// Monthly Sales Per Store
+// ------------------------------------------------------------------------------
+// Retrieve monthly sales data
+app.post('/reports/monthly-sales', async (req, res) => {
+    try {
+        const result = await supermarketPool.query(`
+            SELECT
+                s.store_id,
+                s.street,
+                s.city,
+                s.state_code,
+                s.zip_code,
+                DATE_TRUNC('month', t.date_and_time)::DATE
+                    AS sales_month,
+                COUNT(t.transaction_id)
+                    AS total_transactions,
+                SUM(t.total_amount)
+                    AS total_revenue,
+                ROUND(AVG(t.total_amount), 2)
+                    AS average_transaction
+            FROM store_transaction AS t
+            JOIN store AS s ON t.store_id = s.store_id
+            GROUP BY
+                s.store_id,
+                s.street,
+                s.city,
+                s.state_code,
+                s.zip_code,
+                DATE_TRUNC('month', t.date_and_time)
+            ORDER BY sales_month DESC, total_revenue DESC;
+        `);
+
+        console.log(`Monthly sales report: ${result.rows.length} rows`);
+
+        return res.json({
+            success: true,
+            rows: result.rows
+        });
+    } catch (error) {
+        console.error(`Monthly sales report failed: ${error.message}`);
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
+
+// ------------------------------------------------------------------------------
+// Top Selling Items by Department Endpoint
+// ------------------------------------------------------------------------------
+// Shows the highest revenue item in each department.
+// By default, the report includes all stores.
+// To filter by a specific store, add ?storeId=1 to the URL.
+
+app.get('/reports/top-selling-items', async (req, res) => {
+
+    // Filter top-selling items across all stores or within a specific store
+    const storeId = req.query.storeId === undefined ? null : Number(req.query.storeId);
+
+    // Null means result from all stores
+    if (storeId !== null &&
+        (!Number.isInteger(storeId) || storeId <= 0)) {
+
+        return res.status(400).json({
+            success: false,
+            error: 'Invalid store ID'
+        });
+    }
+
+    try {
+        const result = await supermarketPool.query(`
+            WITH top_selling AS (
+                SELECT
+                    d.department_id,
+                    d.name AS department_name,
+                    i.sku,
+                    i.name AS item_name,
+                    SUM(s.quantity_sold) AS total_quantity_sold,
+                    SUM(s.quantity_sold * s.unit_price) AS total_revenue
+                FROM item_sale AS s
+                JOIN item AS i ON s.sku = i.sku
+                JOIN department AS d ON i.department_id = d.department_id
+                JOIN store_transaction AS t ON s.transaction_id = t.transaction_id
+                WHERE ($1::INTEGER IS NULL OR t.store_id = $1)
+                GROUP BY d.department_id, d.name, i.sku, i.name
+        ),
+        ranked_products AS (
+            SELECT *,
+                ROW_NUMBER() OVER (PARTITION BY department_id 
+                ORDER BY total_revenue DESC, sku
+                ) AS product_rank
+            FROM top_selling
+        )
+        SELECT 
+            department_name, 
+            sku, 
+            item_name, 
+            total_quantity_sold, 
+            total_revenue
+        FROM ranked_products
+        WHERE product_rank = 1
+        ORDER BY department_name;
+        `, [storeId]);
+
+        return res.json({
+            success: true,
+            storeId: storeId,
+            items: result.rows
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
+// ------------------------------------------------------------------------------
+// Low Stock Reorder List
+// ------------------------------------------------------------------------------
+// Items below the stock threshold, with how fast they sold over the last 30 days
+// so the fastest-selling shortages come first. Optional storeId limits it to one
+// store; threshold defaults to 10 (units, or lbs for weighed items).
+app.post('/reports/low-stock', async (req, res) => {
+    const { storeId = null, threshold = 10 } = req.body;
+
+    if (storeId !== null &&
+        (!Number.isInteger(storeId) || storeId <= 0)) {
+        return res.status(400).json({ success: false, message: 'Invalid store ID' });
+    }
+
+    if (typeof threshold !== 'number' ||
+        !Number.isFinite(threshold) ||
+        threshold <= 0) {
+        return res.status(400).json({ success: false, message: 'Invalid threshold' });
+    }
+
+    try {
+        const result = await supermarketPool.query(`
+            SELECT
+                s.store_id,
+                s.street,
+                s.city,
+                s.state_code,
+                inv.aisle_no,
+                i.sku,
+                i.name AS item_name,
+                d.name AS department_name,
+                i.priced_by_weight,
+                inv.quantity_in_stock,
+                COALESCE(recent.quantity_sold, 0) AS sold_last_30_days
+            FROM inventory AS inv
+            JOIN item AS i ON inv.sku = i.sku
+            JOIN department AS d ON i.department_id = d.department_id
+            JOIN store AS s ON inv.store_id = s.store_id
+            LEFT JOIN (
+                SELECT
+                    t.store_id,
+                    si.sku,
+                    SUM(si.quantity_sold) AS quantity_sold
+                FROM item_sale AS si
+                JOIN store_transaction AS t ON si.transaction_id = t.transaction_id
+                WHERE t.date_and_time >= now() - INTERVAL '30 days'
+                GROUP BY t.store_id, si.sku
+            ) AS recent ON recent.store_id = inv.store_id AND recent.sku = inv.sku
+            WHERE inv.quantity_in_stock < $1
+              AND ($2::INTEGER IS NULL OR inv.store_id = $2)
+            ORDER BY
+                inv.quantity_in_stock,
+                sold_last_30_days DESC,
+                s.store_id,
+                inv.aisle_no;
+        `, [threshold, storeId]);
+
+        console.log(`Low stock report (store ${storeId ?? 'all'}, < ${threshold}): ` +
+            `${result.rows.length} rows`);
+
+        return res.json({
+            success: true,
+            rows: result.rows
+        });
+    } catch (error) {
+        console.error(`Low stock report failed: ${error.message}`);
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
+
+// ------------------------------------------------------------------------------
 // Reset Endpoint
 // ------------------------------------------------------------------------------
 app.post('/reset-tables', async (req, res) => {
@@ -275,10 +468,34 @@ app.post('/reset-tables', async (req, res) => {
         // Reset the supermarket database
         const ddl = fs.readFileSync(path.join(__dirname, '..', 'ddl', 'ddl.sql'), 'utf8');
         await supermarketPool.query(ddl);
-        console.log('Ran ddl.sql');
+        console.log('Supermarket tables reset from ddl.sql');
 
         res.json({ success: true });
     } catch (error) {
+        console.error(`Supermarket reset failed: ${error.message}`);
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// ------------------------------------------------------------------------------
+// Bank Accounts Endpoint
+// ------------------------------------------------------------------------------
+app.post('/accounts', async (req, res) => {
+    try {
+        const queryAccounts = `
+            SELECT account_number, balance
+            FROM account
+            ORDER BY account_number;
+        `;
+        const accounts = await bankPool.query(queryAccounts);
+        console.log(`Loaded ${accounts.rows.length} bank accounts`);
+
+        res.json({
+            success: true,
+            accounts: accounts.rows,
+        });
+    } catch (error) {
+        console.error(`Loading bank accounts failed: ${error.message}`);
         res.status(500).json({ success: false, message: error.message });
     }
 });
@@ -289,14 +506,20 @@ app.post('/reset-tables', async (req, res) => {
 app.post('/stores', async (req, res) => {
     try {
         // Get the stores table
-        const queryStores = `SELECT * FROM store ORDER BY store_id;`;
+        const queryStores = `
+            SELECT *
+            FROM store
+            ORDER BY store_id;
+        `;
         const stores = await supermarketPool.query(queryStores);
+        console.log(`Loaded ${stores.rows.length} stores`);
 
         res.json({
             success: true,
             stores: stores.rows,
         });
     } catch (error) {
+        console.error(`Loading stores failed: ${error.message}`);
         res.status(500).json({ success: false, message: error.message });
     }
 });
@@ -309,16 +532,17 @@ app.post('/reset-bank', async (req, res) => {
         // Reset the bank database
         const ddl = fs.readFileSync(path.join(__dirname, '..', 'ddl', 'bankddl.sql'), 'utf8');
         await bankPool.query(ddl);
-        console.log('Ran bankddl.sql');
 
         const queryAccounts = `SELECT count(*)::int AS count FROM account;`;
         const accounts = await bankPool.query(queryAccounts);
+        console.log(`Bank tables reset from bankddl.sql: ${accounts.rows[0].count} accounts`);
 
         res.json({
             success: true,
             accountCount: accounts.rows[0].count,
         });
     } catch (error) {
+        console.error(`Bank reset failed: ${error.message}`);
         res.status(500).json({ success: false, message: error.message });
     }
 });
@@ -331,18 +555,20 @@ app.post('/inventory', async (req, res) => {
 
     try {
         const queryInventory = `
-        SELECT *
-        FROM inventory 
-        JOIN item ON inventory.sku = item.sku
-        WHERE store_id=${storeID};
+            SELECT *
+            FROM inventory
+            JOIN item ON inventory.sku = item.sku
+            WHERE store_id = $1;
         `;
-        const items = await supermarketPool.query(queryInventory);
+        const items = await supermarketPool.query(queryInventory, [storeID]);
+        console.log(`Loaded ${items.rows.length} inventory items for store ${storeID}`);
 
-        res.json({ 
-            success: true, 
-            items: items.rows, 
+        res.json({
+            success: true,
+            items: items.rows,
         });
-    } catch(error) {
+    } catch (error) {
+        console.error(`Loading inventory for store ${storeID} failed: ${error.message}`);
         res.status(500).json({ success: false, message: error.message });
     }
 });

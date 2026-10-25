@@ -43,6 +43,26 @@
             border-color: #9fd3b0;
         }
 
+        /* 300 accounts is too tall for the page, so the table scrolls */
+        .accounts-display,
+        .report-display {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        /* Keep the column names visible while the rows scroll under them */
+        .accounts-display th,
+        .report-display th {
+            position: sticky;
+            top: 0;
+            background: Canvas;
+        }
+
+        .report-display th,
+        .report-display td {
+            padding: 6px 12px;
+        }
+
         .display-none {
             display: none;
         }
@@ -167,8 +187,33 @@
             // Supermarket Backend
             *************************************************** -->
             <div id="backend-tab" class="tab display-none"> 
+
                 <h2>Backend</h2>
-                <button id="reset-btn">Refresh Tables</button>
+
+                <button id="reset-btn">Reset Supermarket Tables</button>
+                <div id="backend-message-box" class="message display-none"></div>
+
+                <hr>
+
+                <h3>Reports</h3>
+
+                <div id="report-btns">
+                    <button id="monthly-sales-btn" data-report="monthlySales">Monthly Sales Report</button>
+                    <button id="top-sales-btn" data-report="topSellingItems">Top Selling Item per Department</button>
+                    <button id="low-stock-btn" data-report="lowStock">Low Stock Reorder List</button>
+                </div>
+
+                <!-- Only shown for reports with storeFilter: true -->
+                <div id="report-store-filter" class="display-none">
+                    <label for="report-store-select">Store</label>
+                    <select id="report-store-select">
+                        <option value="">All stores</option>
+                    </select>
+                </div>
+
+                <div id="report-title"></div>
+                    
+                <div id="report-display" class="report-display"></div>
 
                 <hr>
 
@@ -182,7 +227,14 @@
             *************************************************** -->
             <div id="bank-tab" class="tab display-none">
                 <h2>Bank</h2>
-                <button id="bank-reset-btn">Refresh Bank Tables</button>
+
+                <hr>
+
+                <div id="accounts-display" class="accounts-display"></div>
+
+                <hr>
+
+                <button id="bank-reset-btn">Reset Bank Tables</button>
 
                 <div id="bank-message-box" class="message display-none"></div>
             </div>
@@ -219,9 +271,16 @@
     let reportsBox = document.getElementById("reports");
     let reportMessageBox = document.getElementById("report-message-box");
     let simulateBtn = document.getElementById("simulate-btn");
+    let backendMessageBox = document.getElementById("backend-message-box");
 
     let bankResetBtn = document.getElementById("bank-reset-btn");
     let bankMessageBox = document.getElementById("bank-message-box");
+    let accountsDisplay = document.getElementById("accounts-display");
+
+    let reportStoreFilter = document.getElementById("report-store-filter");
+    let reportStoreSelect = document.getElementById("report-store-select");
+    let reportTitle = document.getElementById("report-title");
+    let reportDisplay = document.getElementById("report-display");
 
     // ------------------------------------------------------------------------------
     // State 
@@ -240,7 +299,11 @@
     // ------------------------------------------------------------------------------
     backendTabBtn.addEventListener("click", () => switchTab(backendTab));
     customerTabBtn.addEventListener("click", () => switchTab(customerTab));
-    bankTabBtn.addEventListener("click", () => switchTab(bankTab));
+    // Balances change with every card checkout, so reload them each time the tab opens
+    bankTabBtn.addEventListener("click", () => {
+        switchTab(bankTab);
+        loadAccounts();
+    });
 
     function switchTab(tab) {
         [customerTab, backendTab, bankTab].forEach(hide);
@@ -452,7 +515,7 @@
     }
 
     // ------------------------------------------------------------------------------
-    // Reset
+    // Supermarket Reset
     // ------------------------------------------------------------------------------
     resetBtn.addEventListener("click", _ => resetDatabase());
 
@@ -466,10 +529,133 @@
             clearMessage();
             await loadStores();
 
+            showMessage('Supermarket tables reset.', 'success', backendMessageBox);
+
         } catch (error) {
             console.error(error);
-            showMessage(`Refresh failed: ${error.message}`);
+            showMessage(`Supermarket reset failed: ${error.message}`, 'error', backendMessageBox);
         }
+    }
+
+    // ------------------------------------------------------------------------------
+    // Reports
+    // ------------------------------------------------------------------------------
+    // To add a report: add an entry here, a server endpoint that returns
+    // { success, <rowsKey> }, and a button with data-report="<key>"
+    const money = n => `$${Number(n).toFixed(2)}`;
+
+    const REPORTS = {
+        monthlySales: {
+            title: 'Monthly Sales',
+            load: () => postJSON('reports/monthly-sales'),
+            rowsKey: 'rows',
+            columns: [
+                ['Month', r => r.sales_month.slice(0, 7)],
+                ['Store', r => `${r.street}, ${r.city}, ${r.state_code}, ${r.zip_code}`],
+                ['Transactions', r => r.total_transactions],
+                ['Revenue', r => money(r.total_revenue)],
+                ['Avg Transaction', r => money(r.average_transaction)],
+            ],
+        },
+        topSellingItems: {
+            title: 'Top Selling Item per Department',
+            storeFilter: true,
+            // Blank store select means all stores
+            load:() => getJSON('reports/top-selling-items' +
+                (reportStoreSelect.value ? `?storeId=${reportStoreSelect.value}` : '')),
+            rowsKey: 'items',
+            columns: [
+                ['Department', r => r.department_name],
+                ['SKU', r => r.sku],
+                ['Item', r => r.item_name],
+                ['Quantity Sold', r => Number(r.total_quantity_sold)],
+                ['Revenue', r => money(r.total_revenue)],
+            ],
+        },
+        lowStock: {
+            title: 'Low Stock Reorder List (under 10 in stock)',
+            storeFilter: true,
+            load: () => postJSON('reports/low-stock', {
+                storeId: reportStoreSelect.value ? Number(reportStoreSelect.value) : null,
+            }),
+            rowsKey: 'rows',
+            columns: [
+                ['Store', r => `${r.street}, ${r.city}, ${r.state_code}`],
+                ['Aisle', r => r.aisle_no],
+                ['SKU', r => r.sku],
+                ['Item', r => r.item_name],
+                ['Department', r => r.department_name],
+                ['In Stock', r => `${Number(r.quantity_in_stock)}${r.priced_by_weight ? ' lb' : ''}`],
+                ['Sold (30 days)', r => `${Number(r.sold_last_30_days)}${r.priced_by_weight ? ' lb' : ''}`],
+            ],
+        },
+    };
+
+    let currentReport = null;
+
+    // Clicking a report button always starts from all stores
+    document.querySelectorAll("[data-report]").forEach(btn =>
+        btn.addEventListener("click", () => {
+            currentReport = REPORTS[btn.dataset.report];
+            reportStoreSelect.value = '';
+
+            if (currentReport.storeFilter) show(reportStoreFilter);
+            else hide(reportStoreFilter);
+
+            runReport(currentReport);
+        })
+    );
+
+    // Picking a store reruns the report that is showing the filter
+    reportStoreSelect.addEventListener('change', () => runReport(currentReport));
+
+    async function runReport(report) {
+        reportTitle.textContent = report.title;
+        reportDisplay.replaceChildren('Loading...');
+
+        try {
+            const data = await report.load();
+            if (!data.success) throw new Error(data.message || data.error);
+
+            renderReport(report, data[report.rowsKey]);
+
+        } catch (error) {
+            console.error(error);
+            reportDisplay.replaceChildren();
+            showMessage(`${report.title} failed: ${error.message}`, 'error', backendMessageBox);
+        }
+    }
+
+    function renderReport(report, rows) {
+        if (rows.length === 0) {
+            reportDisplay.replaceChildren('No data.');
+            return;
+        }
+
+        const table = document.createElement('table');
+
+        const headRow = document.createElement('tr');
+        for (const [header] of report.columns) {
+            const th = document.createElement('th');
+            th.textContent = header;
+            headRow.appendChild(th);
+        }
+        table.createTHead().appendChild(headRow);
+
+        const tbody = document.createElement('tbody');
+        for (const r of rows) {
+            const row = document.createElement('tr');
+
+            for (const [, value] of report.columns) {
+                const td = document.createElement('td');
+                td.textContent = value(r);
+                row.appendChild(td);
+            }
+            tbody.appendChild(row);
+        }
+        table.appendChild(tbody);
+
+        reportDisplay.replaceChildren(table);
     }
 
     // ------------------------------------------------------------------------------
@@ -485,6 +671,7 @@
             if (!data.success) throw new Error(data.message);
 
             showMessage(`Bank tables refreshed: ${data.accountCount} accounts.`, 'success', bankMessageBox);
+            await loadAccounts();
 
         } catch (error) {
             console.error(error);
@@ -643,11 +830,61 @@
     }
 
     // ------------------------------------------------------------------------------
+    // Bank Accounts
+    // ------------------------------------------------------------------------------
+    async function loadAccounts() {
+        try {
+            const data = await postJSON('accounts');
+            if (!data.success) throw new Error(data.message);
+            renderAccounts(data.accounts);
+
+        } catch (error) {
+            console.error(error);
+            accountsDisplay.replaceChildren();
+            showMessage(`Could not load accounts: ${error.message}. Try Refresh Bank Tables.`, 'error', bankMessageBox);
+        }
+    }
+
+    function renderAccounts(accounts) {
+        if (accounts.length === 0) {
+            accountsDisplay.replaceChildren('No bank accounts.');
+            return;
+        }
+
+        const table = document.createElement('table');
+        table.innerHTML = `
+            <thead>
+                <tr><th>Account Number</th><th>Balance</th></tr>
+            </thead>
+        `;
+
+        const tbody = document.createElement('tbody');
+        for (const a of accounts) {
+            const row = document.createElement('tr');
+
+            [
+                a.account_number,
+                `$${Number(a.balance).toFixed(2)}`,
+            ].forEach(text => {
+                const td = document.createElement('td');
+                td.textContent = text;
+                row.appendChild(td);
+            });
+
+            tbody.appendChild(row);
+        }
+        table.appendChild(tbody);
+
+        accountsDisplay.replaceChildren(table);
+    }
+
+    // ------------------------------------------------------------------------------
     // Simulation
     // ------------------------------------------------------------------------------
     simulateBtn.addEventListener("click", () => simulateCheckout());
 
-    // Checks out 10-20 random in-stock items from a random store, paid in cash
+    // Checks out 10-20 random in-stock items from a random store,
+    // paid by card from a random bank account 70% of the time, otherwise cash
     async function simulateCheckout() {
         try {
             const store = locations[randomInt(0, locations.length - 1)];
@@ -668,20 +905,33 @@
                 return { sku: i.sku, name: i.name, quantity };
             });
 
+            let paymentMethod = 'cash';
+            let accountId;
+            if (Math.random() < 0.7) {
+                const bank = await postJSON('accounts');
+                if (!bank.success) throw new Error(bank.message);
+                if (bank.accounts.length === 0) throw new Error('No bank accounts');
+
+                paymentMethod = 'card';
+                accountId = bank.accounts[randomInt(0, bank.accounts.length - 1)].account_number;
+            }
+            const payment = paymentMethod === 'card' ? `card, account ${accountId}` : 'cash';
+
             const result = await postJSON('test-transaction', {
                 storeId: store.store_id,
                 items: items.map(({ sku, quantity }) => ({ sku, quantity })),
-                paymentMethod: 'cash',
+                paymentMethod,
+                accountId,
             });
 
             if (result.error || !result.success) {
-                throw new Error(result.error ?? result.message);
+                throw new Error(`${result.error ?? result.message} (${payment})`);
             }
 
             console.table(items);
             showMessage(
                 `Transaction #${result.transactionId} at ${store.street}, ${store.city}: ` +
-                `${items.length} items, total $${result.total} (cash).`,
+                `${items.length} items, total $${result.total} (${payment}).`,
                 'success'
             );
 
@@ -703,6 +953,12 @@
         ));
 
         locationSelect.replaceChildren(...options);
+
+        // Same stores for the report filter; an <option> can only live in one select
+        reportStoreSelect.replaceChildren(
+            new Option('All stores', ''),
+            ...options.map(option => option.cloneNode(true))
+        );
     }
 
     // ------------------------------------------------------------------------------
@@ -753,6 +1009,11 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
         });
+        return await response.json();
+    }
+
+    async function getJSON(endpoint) {
+        const response = await fetch(`http://localhost:3000/${endpoint}`);
         return await response.json();
     }
 </script>
