@@ -46,6 +46,49 @@
         .display-none {
             display: none;
         }
+
+        .report {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .report-inputs {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: end;
+            gap: 12px;
+        }
+
+        .report-inputs input {
+            width: 5em;
+        }
+
+        .report-result {
+            overflow-x: auto;
+        }
+
+        .report-result table {
+            border-collapse: collapse;
+        }
+
+        .report-result th,
+        .report-result td {
+            border: 1px solid #ccc;
+            padding: 4px 10px;
+            text-align: left;
+            white-space: nowrap;
+        }
+
+        .report-result td.num {
+            text-align: right;
+        }
+
+        .report-sql {
+            max-width: 100%;
+            overflow-x: auto;
+            font-size: 0.85em;
+        }
     </style>
 </head>
 
@@ -126,6 +169,12 @@
             <div id="backend-tab" class="tab display-none"> 
                 <h2>Backend</h2>
                 <button id="reset-btn">Refresh Tables</button>
+
+                <hr>
+
+                <h3>Reports</h3>
+                <div id="reports" class="tab"></div>
+                <div id="report-message-box" class="message display-none"></div>
             </div>
 
             <!-- **************************************************
@@ -167,6 +216,8 @@
     let messageBox = document.getElementById("message-box");
 
     let resetBtn = document.getElementById("reset-btn");
+    let reportsBox = document.getElementById("reports");
+    let reportMessageBox = document.getElementById("report-message-box");
     let simulateBtn = document.getElementById("simulate-btn");
 
     let bankResetBtn = document.getElementById("bank-reset-btn");
@@ -439,6 +490,156 @@
             console.error(error);
             showMessage(`Bank refresh failed: ${error.message}`, 'error', bankMessageBox);
         }
+    }
+
+    // ------------------------------------------------------------------------------
+    // Back Office Reports
+    // ------------------------------------------------------------------------------
+    // Each report maps to POST /reports/<name>; the SQL itself is in query.sql
+    const REPORTS = [
+        {
+            name: 'revenue_by_store',
+            title: 'Revenue by store',
+            description: 'Revenue, tax, average basket and card share for every store, ranked.',
+            params: [{ name: 'days', label: 'Last (days)', value: 90 }],
+        },
+        {
+            name: 'top_items',
+            title: 'Best sellers by department',
+            description: 'The three highest-earning items in each department and their share of it.',
+            params: [],
+        },
+        {
+            name: 'restock',
+            title: 'Restock list',
+            description: 'Shelf items that will sell out soonest at their recent sales pace, with aisle.',
+            params: [
+                { name: 'days', label: 'Sales window (days)', value: 30 },
+                { name: 'threshold', label: 'Days of stock below', value: 14 },
+            ],
+        },
+    ];
+
+    renderReports();
+
+    function renderReports() {
+        reportsBox.replaceChildren(...REPORTS.map(buildReport));
+    }
+
+    function buildReport(report) {
+        const section = document.createElement('div');
+        section.className = 'report';
+
+        const title = document.createElement('h4');
+        title.textContent = report.title;
+
+        const description = document.createElement('p');
+        description.textContent = report.description;
+
+        const inputsRow = document.createElement('div');
+        inputsRow.className = 'report-inputs';
+
+        const inputs = report.params.map(p => {
+            const label = document.createElement('label');
+            label.append(`${p.label} `);
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.min = 1;
+            input.step = 1;
+            input.value = p.value;
+            label.appendChild(input);
+            inputsRow.appendChild(label);
+            return { name: p.name, input };
+        });
+
+        const runBtn = document.createElement('button');
+        runBtn.textContent = 'Run report';
+        inputsRow.appendChild(runBtn);
+
+        const result = document.createElement('div');
+        result.className = 'report-result';
+
+        runBtn.addEventListener('click', () => runReport(report, inputs, result, runBtn));
+
+        section.append(title, description, inputsRow, result);
+        return section;
+    }
+
+    async function runReport(report, inputs, resultBox, runBtn) {
+        const body = {};
+        for (const { name, input } of inputs) {
+            if (!input.checkValidity() || input.value === '') {
+                showMessage(`Enter a whole number for "${input.parentElement.textContent.trim()}".`, 'error', reportMessageBox);
+                return;
+            }
+            body[name] = Number(input.value);
+        }
+
+        runBtn.disabled = true;
+        try {
+            const data = await postJSON(`reports/${report.name}`, body);
+            if (!data.success) throw new Error(data.message);
+
+            hide(reportMessageBox);
+            resultBox.replaceChildren(
+                buildResultTable(data),
+                buildSqlDetails(data),
+            );
+
+        } catch (error) {
+            console.error(error);
+            showMessage(`${report.title} failed: ${error.message}`, 'error', reportMessageBox);
+        } finally {
+            runBtn.disabled = false;
+        }
+    }
+
+    function buildResultTable(data) {
+        if (data.rows.length === 0) {
+            const empty = document.createElement('p');
+            empty.textContent = 'No rows match. Try a longer time window, or refresh the tables.';
+            return empty;
+        }
+
+        const table = document.createElement('table');
+        const headRow = document.createElement('tr');
+        for (const column of data.columns) {
+            const th = document.createElement('th');
+            th.textContent = column.replaceAll('_', ' ');
+            headRow.appendChild(th);
+        }
+        const thead = document.createElement('thead');
+        thead.appendChild(headRow);
+
+        const tbody = document.createElement('tbody');
+        for (const row of data.rows) {
+            const tr = document.createElement('tr');
+            for (const column of data.columns) {
+                const td = document.createElement('td');
+                const value = row[column];
+                td.textContent = value ?? '';
+                if (/^-?\d+(\.\d+)?$/.test(String(value))) td.className = 'num';
+                tr.appendChild(td);
+            }
+            tbody.appendChild(tr);
+        }
+
+        table.append(thead, tbody);
+        return table;
+    }
+
+    // Shows the exact SQL sent to the server, its parameters and the run time
+    function buildSqlDetails(data) {
+        const details = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.textContent = `${data.rows.length} rows in ${data.elapsedMs} ms - show SQL`;
+
+        const pre = document.createElement('pre');
+        pre.className = 'report-sql';
+        pre.textContent = data.sql + (data.params.length ? `\n\n-- parameters: ${JSON.stringify(data.params)}` : '');
+
+        details.append(summary, pre);
+        return details;
     }
 
     // ------------------------------------------------------------------------------
